@@ -43,10 +43,10 @@ local T = {
     Separator    = Color3.fromRGB(30,  40,  58),
     Corner       = UDim.new(0, 7),
     SmallCorner  = UDim.new(0, 5),
-    SidebarW     = 145,
-    RowH         = 36,
-    WinW         = 480,
-    WinH         = 360,
+    SidebarW     = 110,
+    RowH         = 32,
+    WinW         = 340,
+    WinH         = 260,
 }
 
 -- ─────────────────────────────────────────────────────────────────
@@ -168,7 +168,7 @@ New("ImageLabel", {
 })
 
 -- ── Title Bar ──
-local TBar = New("Frame", {Size=UDim2.new(1,0,0,40), BackgroundColor3=T.SidebarBG, BorderSizePixel=0, ZIndex=6, Parent=Main})
+local TBar = New("Frame", {Size=UDim2.new(1,0,0,32), BackgroundColor3=T.SidebarBG, BorderSizePixel=0, ZIndex=6, Parent=Main})
 New("Frame", {Size=UDim2.new(1,0,0,1), Position=UDim2.new(0,0,1,-1), BackgroundColor3=T.Accent, BackgroundTransparency=0.55, BorderSizePixel=0, ZIndex=7, Parent=TBar})
 local dot = New("Frame", {Size=UDim2.new(0,7,0,7), Position=UDim2.new(0,12,0.5,-3), BackgroundColor3=T.Accent, BorderSizePixel=0, ZIndex=7, Parent=TBar})
 Corner(dot, UDim.new(1,0))
@@ -181,7 +181,7 @@ local MinBtn = New("TextButton", {Text="─", Size=UDim2.new(0,28,0,28), Positio
 Corner(MinBtn, UDim.new(0,5))
 
 -- ── Body / Sidebar / Content ──
-local Body = New("Frame", {Size=UDim2.new(1,0,1,-40), Position=UDim2.new(0,0,0,40), BackgroundTransparency=1, BorderSizePixel=0, Parent=Main})
+local Body = New("Frame", {Size=UDim2.new(1,0,1,-32), Position=UDim2.new(0,0,0,32), BackgroundTransparency=1, BorderSizePixel=0, Parent=Main})
 local Sidebar = New("Frame", {Size=UDim2.new(0,T.SidebarW,1,0), BackgroundColor3=T.SidebarBG, BorderSizePixel=0, Parent=Body})
 New("Frame", {Size=UDim2.new(0,1,1,0), Position=UDim2.new(1,-1,0,0), BackgroundColor3=T.Separator, BorderSizePixel=0, Parent=Sidebar})
 local TabListFrame = New("ScrollingFrame", {
@@ -229,8 +229,8 @@ local ActiveTab = nil
 
 local function CreateTab(name, icon)
     local btn = New("TextButton", {
-        Name=name, Size=UDim2.new(1,0,0,34), BackgroundColor3=T.ElementBG, BackgroundTransparency=1,
-        Font=Enum.Font.Gotham, TextSize=12, TextColor3=T.TextSec,
+        Name=name, Size=UDim2.new(1,0,0,28), BackgroundColor3=T.ElementBG, BackgroundTransparency=1,
+        Font=Enum.Font.Gotham, TextSize=11, TextColor3=T.TextSec,
         Text=(icon or "  ").."  "..name, TextXAlignment=Enum.TextXAlignment.Left,
         BorderSizePixel=0, Parent=TabListFrame,
     })
@@ -244,9 +244,13 @@ local function CreateTab(name, icon)
         Name=name.."Page", Size=UDim2.new(1,0,1,0), BackgroundTransparency=1,
         ScrollBarThickness=3, ScrollBarImageColor3=T.Accent,
         CanvasSize=UDim2.new(0,0,0,0), AutomaticCanvasSize=Enum.AutomaticSize.Y,
+        ScrollingDirection=Enum.ScrollingDirection.Y,
+        BottomImage="rbxasset://textures/ui/Scroll/scroll-middle.png",
         Visible=false, Parent=PageContainer,
     })
-    Pad(page,8,8,10,10); List(page,nil,4)
+    Pad(page,8,0,10,10); List(page,nil,4)
+    -- Bottom spacer so the last element is never clipped under the frame edge
+    local _spacer = New("Frame",{Size=UDim2.new(1,0,0,18),BackgroundTransparency=1,LayoutOrder=9999,Parent=page})
 
     local Tab = {Button=btn, Page=page, Indicator=indicator}
 
@@ -363,15 +367,28 @@ local function CreateTab(name, icon)
                 current=opt; valLbl.Text=opt; closeDD()
                 if cb then pcall(cb,opt) end
             end
+            -- PC: normal click
             ib.MouseButton1Click:Connect(pick)
+            -- Mobile: track the FULL touch from start to end.
+            -- Only call pick() when the finger lifts AND total travel was small (true tap).
+            -- This way a slow scroll — which has large total travel — never triggers pick().
             ib.InputBegan:Connect(function(i)
-                if i.UserInputType==Enum.UserInputType.Touch then
-                    -- small delay so the scroll gesture can be distinguished from a tap
-                    local startPos = i.Position
-                    task.delay(0.08, function()
-                        if (i.Position - startPos).Magnitude < 12 then pick() end
-                    end)
-                end
+                if i.UserInputType ~= Enum.UserInputType.Touch then return end
+                local startPos = i.Position
+                local maxDelta = 0
+                local moveConn = UserInputService.InputChanged:Connect(function(mi)
+                    if mi.UserInputType == Enum.UserInputType.Touch then
+                        maxDelta = math.max(maxDelta, (mi.Position - startPos).Magnitude)
+                    end
+                end)
+                local endConn
+                endConn = UserInputService.InputEnded:Connect(function(ei)
+                    if ei.UserInputType == Enum.UserInputType.Touch then
+                        moveConn:Disconnect(); endConn:Disconnect()
+                        -- Only select if finger moved less than 20px total (clear tap, not a scroll)
+                        if maxDelta < 20 then pick() end
+                    end
+                end)
             end)
         end
 
