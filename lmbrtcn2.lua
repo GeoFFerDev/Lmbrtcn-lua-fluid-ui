@@ -456,16 +456,20 @@ end
 -- ═══════════════════════════════════════════════════════════════════
 
 -- Lazy remote resolvers  (NO blocking WaitForChild at startup)
-local _Interaction, _Transactions
+local _Interaction, _Transactions, _LoadSaveRequests
 local function GetInteraction()
     if not _Interaction then _Interaction=ReplicatedStorage:FindFirstChild("Interaction") end
     return _Interaction
 end
 local function GetTransactions()
-    if not _Transactions then
-        _Transactions = ReplicatedStorage:FindFirstChild("Transactions") or ReplicatedStorage:FindFirstChild("Interaction")
-    end
+    -- Transactions is its own separate Folder in ReplicatedStorage (NOT Interaction)
+    if not _Transactions then _Transactions=ReplicatedStorage:FindFirstChild("Transactions") end
     return _Transactions
+end
+local function GetLoadSave()
+    -- RequestSave, RequestLoad, SelectLoadPlot are in LoadSaveRequests, NOT Transactions
+    if not _LoadSaveRequests then _LoadSaveRequests=ReplicatedStorage:FindFirstChild("LoadSaveRequests") end
+    return _LoadSaveRequests
 end
 
 local function GetChar() return LP.Character end
@@ -535,21 +539,21 @@ RunService.Heartbeat:Connect(function()
     elseif Flags.AlwaysNight then Lighting.ClockTime=0; Lighting.Brightness=0.5 end
 end)
 
--- WAYPOINTS (from rbxlx file analysis)
+-- WAYPOINTS (coordinates verified against XML CFrame data)
 local Locations = {
-    ["Spawn"]             = CFrame.new(150,  10,   50),
+    ["Spawn"]             = CFrame.new(163,   5,   58),   -- main spawn area
     ["Main Forest"]       = CFrame.new(300,  10, -200),
-    ["Wood Dropoff"]      = CFrame.new(322,  15,   97),
-    ["Sell Wood"]         = CFrame.new(255,   8,   66),
-    ["Wood R' Us"]        = CFrame.new(5184, 65,  535),
-    ["Land Store"]        = CFrame.new(268,   8,   67),
+    ["Wood Dropoff"]      = CFrame.new(322.5, 14,  97.1), -- WOODDROPOFF Part from XML
+    ["Sell Wood"]         = CFrame.new(255.7,  7,  66.1), -- SELLWOOD Part from XML
+    ["Wood R' Us"]        = CFrame.new(301.7, 15,  57.5), -- Store_WoodRUs Part from XML
+    ["Land Store"]        = CFrame.new(284.1, 12, -99.5), -- Store_Land Part from XML
     ["Car Store"]         = CFrame.new(200,   8,   40),
     ["Fancy Furnishings"] = CFrame.new(183,   8,   66),
-    ["Snow Biome"]        = CFrame.new(-1052, 10, -992),
+    ["Snow Biome"]        = CFrame.new(1093, 50, 1725),   -- Snow region from XML
     ["Volcano Biome"]     = CFrame.new(163,  55, 1276),
-    ["Swamp Biome"]       = CFrame.new(1328,  5,  -683),
+    ["Swamp Biome"]       = CFrame.new(-1137,125, -996),  -- SwampWater Part from XML
     ["Tropics / Ferry"]   = CFrame.new(1294, 105, 2715),
-    ["Mountain"]          = CFrame.new(-400, 80,  300),
+    ["Mountain"]          = CFrame.new(-400,  80,  300),
 }
 local function TeleportTo(name)
     local cf=Locations[name]; if not cf then return end
@@ -574,21 +578,31 @@ local function FreeLand()
     for _,plot in ipairs(props:GetChildren()) do
         local ow=plot:FindFirstChild("Owner")
         if ow and not ow.Value then
-            for _,v in ipairs(plot:GetChildren()) do
-                if v:IsA("BasePart") then local hrp=GetHRP(); if hrp then hrp.CFrame=CFrame.new(v.Position+Vector3.new(0,10,0)) end; return end
+            -- Teleport to the plot's OriginSquare or first BasePart
+            local origin=plot:FindFirstChild("OriginSquare") or plot:FindFirstChild("Square")
+            local hrp=GetHRP()
+            if hrp and origin and origin:IsA("BasePart") then
+                hrp.CFrame=CFrame.new(origin.Position+Vector3.new(0,10,0))
             end
+            -- Also invoke SelectLoadPlot which is in LoadSaveRequests
+            local ls=GetLoadSave()
+            if ls then local rf=ls:FindFirstChild("SelectLoadPlot"); if rf then pcall(function() rf:InvokeServer() end) end end
+            return
         end
     end
-    local tr=GetTransactions(); if tr then local rf=tr:FindFirstChild("SelectLoadPlot"); if rf then pcall(function() rf:InvokeServer() end) end end
 end
 local function ForceSave()
-    local tr=GetTransactions(); if not tr then return end
-    local rf=tr:FindFirstChild("RequestSave"); if rf then pcall(function() rf:InvokeServer() end) end
+    -- RequestSave is in LoadSaveRequests, NOT Transactions
+    local ls=GetLoadSave(); if not ls then return end
+    local rf=ls:FindFirstChild("RequestSave"); if rf then pcall(function() rf:InvokeServer() end) end
 end
 local function GetFunds()
+    -- GetFunds RemoteFunction is in Transactions (confirmed in XML)
     local tr=GetTransactions(); if not tr then return "?" end
     local rf=tr:FindFirstChild("GetFunds")
-    if rf then local ok,v=pcall(function() return rf:InvokeServer() end); if ok then return tostring(v) end end
+    if rf and rf:IsA("RemoteFunction") then
+        local ok,v=pcall(function() return rf:InvokeServer() end); if ok and v then return tostring(v) end
+    end
     return "?"
 end
 
@@ -596,14 +610,20 @@ end
 local function GetWoodPieces()
     local list={}
     for _,v in ipairs(Workspace:GetDescendants()) do
-        if (v.Name=="WoodSection" or v.Name=="Plank") and v:IsA("BasePart") then table.insert(list,v) end
+        if (v.Name=="WoodSection" or v.Name=="Plank" or v.Name=="WoodPiece") and v:IsA("BasePart") then
+            table.insert(list,v)
+        end
     end
     return list
 end
 local function SellWood()
-    local dropPos=Vector3.new(322,15,97); local n=0
+    -- WOODDROPOFF is at 322.5, 11, 97.1 (confirmed from XML CFrame)
+    local dropPos=Vector3.new(322.5, 12, 97.1); local n=0
     for i,p in ipairs(GetWoodPieces()) do
-        pcall(function() p.Anchored=false; p.Velocity=Vector3.zero; p.CFrame=CFrame.new(dropPos+Vector3.new((i%5)*2,i*0.08,0)) end)
+        pcall(function()
+            p.Anchored=false; p.AssemblyLinearVelocity=Vector3.zero
+            p.CFrame=CFrame.new(dropPos+Vector3.new((i%5)*2.5, i*0.1, math.floor(i/5)*2.5))
+        end)
         n=n+1; if n>200 then break end
     end
 end
@@ -611,13 +631,16 @@ local function TeleportWoodToMe()
     local hrp=GetHRP(); if not hrp then return end
     local pos=hrp.Position; local n=0
     for _,p in ipairs(GetWoodPieces()) do
-        pcall(function() p.CFrame=CFrame.new(pos+Vector3.new(n%5*2,0,math.floor(n/5)*2)) end); n=n+1; if n>150 then break end
+        pcall(function() p.CFrame=CFrame.new(pos+Vector3.new((n%5)*2.5, 1, math.floor(n/5)*2.5)) end)
+        n=n+1; if n>150 then break end
     end
 end
 local function DupeWood()
+    -- Store_WoodRUs part is at 301.7, 13.8, 57.5 (from XML). NOT 5184,65,535.
+    local storePos=CFrame.new(301.7, 15, 57.5)
     for _,v in ipairs(Workspace:GetDescendants()) do
-        if v:IsA("Model") and v:FindFirstChild("TreeRegion") then
-            pcall(function() v:SetPrimaryPartCFrame(CFrame.new(5184,65,535)) end)
+        if v:IsA("Model") and v:FindFirstChild("WoodSection") then
+            pcall(function() v:SetPrimaryPartCFrame(storePos) end)
         end
     end
 end
@@ -630,41 +653,56 @@ local function StartAutoChop()
         local hrp=GetHRP(); if not hrp then return end
         local nearest,dist=nil,80
         for _,v in ipairs(Workspace:GetDescendants()) do
-            if (v:IsA("MeshPart") or v:IsA("UnionOperation") or v:IsA("Part"))
-            and (v.Name=="WoodSection" or v.Name=="Trunk" or v.Name:lower():find("trunk")) then
-                local d=(hrp.Position-v.Position).Magnitude; if d<dist then nearest=v; dist=d end
+            if v:IsA("BasePart")
+            and (v.Name=="WoodSection" or v.Name=="Wood" or v.Name=="Trunk" or v.Name:lower():find("trunk")) then
+                local d=(hrp.Position-v.Position).Magnitude
+                if d<dist then nearest=v; dist=d end
             end
         end
         if nearest then
-            local ce=nearest:FindFirstChild("CutEvent"); if ce then pcall(function() ce:FireServer() end) end
-            local r=ReplicatedStorage:FindFirstChild("Chop",true) or ReplicatedStorage:FindFirstChild("ChopTree",true)
-            if r and r:IsA("RemoteEvent") then pcall(function() r:FireServer(nearest) end) end
+            -- CutEvent is a BindableEvent on the tree Model, use :Fire() not :FireServer()
+            local model = nearest:FindFirstAncestorOfClass("Model") or nearest.Parent
+            local ce = model and model:FindFirstChild("CutEvent")
+            if ce and ce:IsA("BindableEvent") then pcall(function() ce:Fire() end) end
         end
     end)
 end
 local function StopAutoChop() if autoChopConn then autoChopConn:Disconnect(); autoChopConn=nil end end
 
--- AUTO SELL
-local autoSellConn
+-- AUTO SELL  (use task loop, not Heartbeat — no need to run 60x/sec)
+local autoSellThread
 local function StartAutoSell()
-    autoSellConn=RunService.Heartbeat:Connect(function()
-        if not Flags.AutoSell then return end; SellWood()
-        local r=ReplicatedStorage:FindFirstChild("SellWood",true) or ReplicatedStorage:FindFirstChild("Sell",true)
-        if r and r:IsA("RemoteEvent") then pcall(function() r:FireServer() end) end
+    autoSellThread=task.spawn(function()
+        while Flags.AutoSell do
+            SellWood()
+            task.wait(3)
+        end
     end)
 end
-local function StopAutoSell() if autoSellConn then autoSellConn:Disconnect(); autoSellConn=nil end end
+local function StopAutoSell()
+    Flags.AutoSell=false
+    if autoSellThread then task.cancel(autoSellThread); autoSellThread=nil end
+end
 
 -- AUTO BUY
 local autoBuyThread
+local function BuyAxe(item)
+    -- Teleport to the actual Wood R' Us store counter (Store_WoodRUs at 301.7, 13.8, 57.5)
+    local hrp=GetHRP(); if hrp then hrp.CFrame=CFrame.new(301.7, 15, 57.5) end
+    task.wait(1)
+    local tr=GetTransactions()
+    if tr then
+        local rf=tr:FindFirstChild("AttemptPurchase")
+        if rf and rf:IsA("RemoteFunction") then pcall(function() rf:InvokeServer(item) end) end
+    end
+end
 local function StartAutoBuy(item, amount)
     Flags.AutoBuyRunning=true
     if autoBuyThread then task.cancel(autoBuyThread) end
     autoBuyThread=task.spawn(function()
         local done=0
         while Flags.AutoBuyRunning and done<amount do
-            local tr=GetTransactions(); if tr then local rf=tr:FindFirstChild("AttemptPurchase"); if rf then pcall(function() rf:InvokeServer(item) end) end end
-            done=done+1; task.wait(1.5)
+            BuyAxe(item); done=done+1; task.wait(1.5)
         end
         Flags.AutoBuyRunning=false
     end)
@@ -710,11 +748,26 @@ local function GrabTools()
 end
 
 -- STEAL PLOT
+-- Note: Setting Owner.Value client-side doesn't replicate to server.
+-- The real approach is to use SelectLoadPlot from LoadSaveRequests after teleporting to the target's plot.
 local function StealPlot(playerName)
     local target=Players:FindFirstChild(playerName); if not target then return end
     local props=Workspace:FindFirstChild("Properties"); if not props then return end
     for _,plot in ipairs(props:GetChildren()) do
-        local ow=plot:FindFirstChild("Owner"); if ow and ow.Value==target then pcall(function() ow.Value=LP end); return end
+        local ow=plot:FindFirstChild("Owner")
+        if ow and ow.Value==target then
+            -- Teleport onto their plot's OriginSquare first
+            local origin=plot:FindFirstChild("OriginSquare") or plot:FindFirstChild("Square")
+            local hrp=GetHRP()
+            if hrp and origin and origin:IsA("BasePart") then
+                hrp.CFrame=CFrame.new(origin.Position+Vector3.new(0,5,0))
+            end
+            task.wait(0.5)
+            -- Then invoke SelectLoadPlot to register ownership
+            local ls=GetLoadSave()
+            if ls then local rf=ls:FindFirstChild("SelectLoadPlot"); if rf then pcall(function() rf:InvokeServer() end) end end
+            return
+        end
     end
 end
 
@@ -746,7 +799,8 @@ SlotTab:AddButton("Go to Free Land Plot", FreeLand)
 SlotTab:AddButton("Expand Land (Max)", function()
     local intr=GetInteraction(); if not intr then return end
     local evt=intr:FindFirstChild("ClientExpandedProperty")
-    if evt then for i=1,5 do pcall(function() evt:FireServer(i) end); task.wait(0.2) end end
+    -- ClientExpandedProperty is a RemoteEvent - fire it to request expansion
+    if evt and evt:IsA("RemoteEvent") then pcall(function() evt:FireServer() end) end
 end)
 SlotTab:AddSection("Save & Clear")
 SlotTab:AddButton("Force Save", ForceSave)
@@ -821,22 +875,10 @@ end)
 -- AUTO BUY TAB
 local BuyTab = CreateTab("Auto Buy","💰")
 BuyTab:AddSection("Quick Purchase")
-BuyTab:AddButton("Rukiryaxe  — $7,400",function()
-    local hrp=GetHRP(); if hrp then hrp.CFrame=CFrame.new(5184,65,535) end; task.wait(1)
-    local tr=GetTransactions(); if tr then local rf=tr:FindFirstChild("AttemptPurchase"); if rf then pcall(function() rf:InvokeServer("Rukiryaxe") end) end end
-end)
-BuyTab:AddButton("BluesteelAxe",function()
-    local hrp=GetHRP(); if hrp then hrp.CFrame=CFrame.new(5184,65,535) end; task.wait(1)
-    local tr=GetTransactions(); if tr then local rf=tr:FindFirstChild("AttemptPurchase"); if rf then pcall(function() rf:InvokeServer("BluesteelAxe") end) end end
-end)
-BuyTab:AddButton("FireAxe",function()
-    local hrp=GetHRP(); if hrp then hrp.CFrame=CFrame.new(5184,65,535) end; task.wait(1)
-    local tr=GetTransactions(); if tr then local rf=tr:FindFirstChild("AttemptPurchase"); if rf then pcall(function() rf:InvokeServer("FireAxe") end) end end
-end)
-BuyTab:AddButton("IceAxe",function()
-    local hrp=GetHRP(); if hrp then hrp.CFrame=CFrame.new(5184,65,535) end; task.wait(1)
-    local tr=GetTransactions(); if tr then local rf=tr:FindFirstChild("AttemptPurchase"); if rf then pcall(function() rf:InvokeServer("IceAxe") end) end end
-end)
+BuyTab:AddButton("Rukiryaxe  — $7,400",function() BuyAxe("Rukiryaxe") end)
+BuyTab:AddButton("BluesteelAxe",function() BuyAxe("BluesteelAxe") end)
+BuyTab:AddButton("FireAxe",function() BuyAxe("FireAxe") end)
+BuyTab:AddButton("IceAxe",function() BuyAxe("IceAxe") end)
 BuyTab:AddSection("Auto Buy Loop")
 local shopItems={"Rukiryaxe","BluesteelAxe","FireAxe","IceAxe","CaveAxe","RefinedAxe","SilverAxe","Sawmill","Box","Plank"}
 local buyItemDrop=BuyTab:AddDropdown("Item",{Options=shopItems,Default="Rukiryaxe"},function(v) Flags.AutBuyItem=v end)
@@ -883,7 +925,7 @@ SettingsTab:AddLabel("LT2 Exploit Hub  v2.0")
 SettingsTab:AddLabel("Game ID: 13822889")
 SettingsTab:AddLabel("Remotes resolved lazily at runtime")
 SettingsTab:AddSection("Debug / Danger")
-SettingsTab:AddButton("Reset Remote Cache",function() _Interaction=nil; _Transactions=nil end)
+SettingsTab:AddButton("Reset Remote Cache",function() _Interaction=nil; _Transactions=nil; _LoadSaveRequests=nil end)
 SettingsTab:AddButton("Rejoin Server",function() game:GetService("TeleportService"):Teleport(game.PlaceId,LP) end)
 SettingsTab:AddButton("Destroy GUI",function() ScreenGui:Destroy() end)
 
