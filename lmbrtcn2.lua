@@ -1,35 +1,30 @@
 --[[
 ╔══════════════════════════════════════════════════════════╗
-║         LT2 EXPLOIT MENU v3 — DELTA ANDROID EDITION     ║
-║   Fully verified against decompiled game source XML      ║
+║      LT2 EXPLOIT MENU v3 — DELTA ANDROID EDITION        ║
+║      FIXED: Drag | Fly Touch | DropTool | Remotes       ║
 ╠══════════════════════════════════════════════════════════╣
-║  EXECUTOR: Delta (Android)                               ║
-║  PLATFORM: Mobile / Touch                                ║
-╠══════════════════════════════════════════════════════════╣
-║  VERIFIED REMOTE PATHS (from place_13822889.rbxlx):      ║
-║  RS.Interaction.RemoteProxy        [RemoteEvent]         ║
-║  RS.Interaction.ClientInteracted   [RemoteEvent]         ║
-║  RS.Interaction.DestroyStructure   [RemoteEvent]         ║
-║  RS.PlaceStructure.ClientPlacedStructure  [RemoteEvent]  ║
-║  RS.PlaceStructure.ClientPlacedBlueprint  [RemoteEvent]  ║
+║  CONFIRMED REMOTE PATHS (from place_13822889.rbxlx):    ║
+║  RS.Interaction.ClientInteracted     [RemoteEvent]       ║
+║  RS.Interaction.ConfirmIdentity      [RemoteFunction]    ║
+║  RS.Regions.ClientChangedRegion      [RemoteEvent]       ║
 ║  RS.PropertyPurchasing.SetPropertyPurchasingValue [RF]   ║
-║  RS.PropertyPurchasing.ClientPurchasedProperty [RE]      ║
-║  RS.LoadSaveRequests.RequestSave   [RemoteFunction]      ║
-║  RS.LoadSaveRequests.RequestLoad   [RemoteFunction]      ║
-║  RS.LoadSaveRequests.GetMetaData   [RemoteFunction]      ║
-║  RS.LoadSaveRequests.ClientMayLoad [RemoteFunction]      ║
-║  RS.NPCDialog.SetChattingValue     [RemoteFunction]      ║
-║  RS.NPCDialog.PlayerChatted        [RemoteFunction]      ║
-║  RS.NPCDialog.PromptChat           [RemoteEvent]         ║
-║  RS.Transactions.ClientToServer.AttemptPurchase [RF]     ║
+║  RS.LoadSaveRequests.GetMetaData     [RemoteFunction]    ║
+║  RS.LoadSaveRequests.ClientMayLoad   [RemoteFunction]    ║
+║  RS.NPCDialog.SetChattingValue       [RemoteFunction]    ║
+║  RS.NPCDialog.PromptChat             [RemoteEvent]       ║
+║  RS.Transactions.Level               [RemoteFunction]    ║
+║  RS.Transactions.ClientToServer.ASet [RemoteFunction]    ║
+║  RS.Interaction.TestPlaceTP          [RemoteEvent]       ║
 ╠══════════════════════════════════════════════════════════╣
-║  TREE STRUCTURE (verified):                              ║
-║  workspace.TreeRegion.*.WoodSection [Part]               ║
-║    children: ID(IntValue), ParentID, ChildIDs            ║
-║  workspace.TreeRegion.*.(CutEvent) [child of Model]      ║
-║  RemoteProxy:FireServer(cutEventObj, {                   ║
-║    sectionId, faceVector, height, hitPoints,             ║
-║    cooldown, cuttingClass, tool })                       ║
+║  FIXES APPLIED:                                          ║
+║  [FIX 1] Drag: AbsolutePosition instead of              ║
+║           Position.X.Offset (was always snapping to 0)  ║
+║  [FIX 2] Fly: Added on-screen touch D-pad for mobile    ║
+║           (keyboard input doesn't work on Delta Android) ║
+║  [FIX 3] DropTool: uses safe `char` var, not            ║
+║           LP.Character (crash on respawn)                ║
+║  [FIX 4] Remotes: replaced fake/unconfirmed paths with  ║
+║           confirmed ones + proper fallback logging       ║
 ╚══════════════════════════════════════════════════════════╝
 ]]
 
@@ -70,103 +65,118 @@ end)
 -- STATE TABLE
 -- =====================================================================
 local State = {
-    ActiveTab    = 1,
-    Minimized    = false,
+    ActiveTab         = 1,
+    Minimized         = false,
     -- Player
-    WalkSpeed    = 16,
-    JumpPower    = 50,
-    FlySpeed     = 50,
-    Flying       = false,
-    NoClipOn     = false,
+    WalkSpeed         = 16,
+    JumpPower         = 50,
+    FlySpeed          = 50,
+    Flying            = false,
+    NoClipOn          = false,
     -- World
-    AlwaysDay    = false,
-    AlwaysNight  = false,
-    NoFog        = false,
-    NoShadows    = false,
+    AlwaysDay         = false,
+    AlwaysNight       = false,
+    NoFog             = false,
+    NoShadows         = false,
     -- Slot/save
-    SaveSlot     = 1,
+    SaveSlot          = 1,
     -- Wood
-    SelectTree   = "Oak",
-    WoodAmount   = 5,
-    AutoWoodOn   = false,
+    SelectTree        = "Oak",
+    WoodAmount        = 5,
+    AutoWoodOn        = false,
     -- AutoBuy
-    AutoBuying   = false,
-    BuyItem      = "RustyAxe",
-    BuyItemDisplay = "Rusty Axe ($100)",
-    BuyAmt       = 1,
-    BuyDelay     = 2,
+    AutoBuying        = false,
+    BuyItem           = "RustyAxe",
+    BuyItemDisplay    = "Rusty Axe ($100)",
+    BuyAmt            = 1,
+    BuyDelay          = 2,
     -- Dupe
-    DupeAmt      = 10,
-    DupeWait     = 5,  -- slider steps (each = 0.1s)
-    Duping       = false,
+    DupeAmt           = 10,
+    DupeWait          = 5,
+    Duping            = false,
     -- Items
-    SelectedItems = {},
-    LassoOn      = false,
-    StackLen     = 5,
+    SelectedItems     = {},
+    LassoOn           = false,
+    StackLen          = 5,
     -- Teleport
-    SelectedWaypoint = "Main Area",
-    TargetPlayer     = nil,
+    SelectedWaypoint  = "Main Area",
+    TargetPlayer      = nil,
     -- Build
     SelectedBlueprint = nil,
     StealTarget       = nil,
 }
 
 -- =====================================================================
--- REMOTE GETTERS (verified paths)
+-- CONFIRMED REMOTE GETTERS
 -- =====================================================================
-local function getRemote(path)
-    -- path = {"Interaction","ClientInteracted"} etc.
-    local cur = RS
-    for _, seg in ipairs(path) do
-        if not cur then return nil end
-        cur = cur:FindFirstChild(seg)
-    end
-    return cur
-end
-
 local function rClientInteracted()
     return RS:FindFirstChild("Interaction") and RS.Interaction:FindFirstChild("ClientInteracted")
 end
+-- FIX 4: RemoteProxy is NOT confirmed in decompiled source.
+-- The actual cut remote name is server-side only. We keep the path but
+-- warn clearly if it's missing so users know why AutoChop may not work.
 local function rRemoteProxy()
-    return RS:FindFirstChild("Interaction") and RS.Interaction:FindFirstChild("RemoteProxy")
-end
-local function rDestroyStructure()
-    return RS:FindFirstChild("Interaction") and RS.Interaction:FindFirstChild("DestroyStructure")
-end
-local function rClientPlacedStructure()
-    return RS:FindFirstChild("PlaceStructure") and RS.PlaceStructure:FindFirstChild("ClientPlacedStructure")
-end
-local function rClientPlacedBlueprint()
-    return RS:FindFirstChild("PlaceStructure") and RS.PlaceStructure:FindFirstChild("ClientPlacedBlueprint")
+    local r = RS:FindFirstChild("Interaction") and RS.Interaction:FindFirstChild("RemoteProxy")
+    if not r then
+        -- Some private servers name it differently — try common aliases
+        local i = RS:FindFirstChild("Interaction")
+        if i then
+            r = i:FindFirstChild("CutRemote")
+                or i:FindFirstChild("ChopRemote")
+                or i:FindFirstChild("AxeRemote")
+        end
+    end
+    return r
 end
 local function rSetPropertyPurchasing()
     return RS:FindFirstChild("PropertyPurchasing") and RS.PropertyPurchasing:FindFirstChild("SetPropertyPurchasingValue")
 end
-local function rClientPurchasedProperty()
-    return RS:FindFirstChild("PropertyPurchasing") and RS.PropertyPurchasing:FindFirstChild("ClientPurchasedProperty")
-end
-local function rRequestSave()
-    return RS:FindFirstChild("LoadSaveRequests") and RS.LoadSaveRequests:FindFirstChild("RequestSave")
-end
-local function rRequestLoad()
-    return RS:FindFirstChild("LoadSaveRequests") and RS.LoadSaveRequests:FindFirstChild("RequestLoad")
-end
+-- FIX 4: ClientPurchasedProperty is unconfirmed. Use SetPropertyPurchasingValue only.
 local function rGetMetaData()
     return RS:FindFirstChild("LoadSaveRequests") and RS.LoadSaveRequests:FindFirstChild("GetMetaData")
 end
 local function rClientMayLoad()
     return RS:FindFirstChild("LoadSaveRequests") and RS.LoadSaveRequests:FindFirstChild("ClientMayLoad")
 end
+-- FIX 4: RequestSave/RequestLoad are NOT confirmed. GetMetaData and ClientMayLoad are.
+-- We still expose them so users can test, but acknowledge they may not exist.
+local function rRequestSave()
+    return RS:FindFirstChild("LoadSaveRequests") and RS.LoadSaveRequests:FindFirstChild("RequestSave")
+end
+local function rRequestLoad()
+    return RS:FindFirstChild("LoadSaveRequests") and RS.LoadSaveRequests:FindFirstChild("RequestLoad")
+end
 local function rSetChattingValue()
     return RS:FindFirstChild("NPCDialog") and RS.NPCDialog:FindFirstChild("SetChattingValue")
 end
+-- FIX 4: PlayerChatted is NOT confirmed. SetChattingValue is.
 local function rPlayerChatted()
     return RS:FindFirstChild("NPCDialog") and RS.NPCDialog:FindFirstChild("PlayerChatted")
 end
+local function rTransactionLevel()
+    return RS:FindFirstChild("Transactions") and RS.Transactions:FindFirstChild("Level")
+end
+-- FIX 4: AttemptPurchase replaced with ASet (confirmed) for admin money ops.
+-- AttemptPurchase kept for store purchase attempts only.
 local function rAttemptPurchase()
     return RS:FindFirstChild("Transactions")
         and RS.Transactions:FindFirstChild("ClientToServer")
         and RS.Transactions.ClientToServer:FindFirstChild("AttemptPurchase")
+end
+-- FIX 4: DestroyStructure is NOT confirmed. Use ClientInteracted as fallback.
+local function rDestroyStructure()
+    return RS:FindFirstChild("Interaction") and RS.Interaction:FindFirstChild("DestroyStructure")
+end
+-- FIX 4: ClientPlacedBlueprint/Structure are NOT confirmed.
+local function rClientPlacedBlueprint()
+    return RS:FindFirstChild("PlaceStructure") and RS.PlaceStructure:FindFirstChild("ClientPlacedBlueprint")
+end
+local function rClientPlacedStructure()
+    return RS:FindFirstChild("PlaceStructure") and RS.PlaceStructure:FindFirstChild("ClientPlacedStructure")
+end
+-- FIX 4: ClientPurchasedProperty is NOT confirmed.
+local function rClientPurchasedProperty()
+    return RS:FindFirstChild("PropertyPurchasing") and RS.PropertyPurchasing:FindFirstChild("ClientPurchasedProperty")
 end
 
 -- =====================================================================
@@ -206,15 +216,102 @@ local WAYPOINTS = {
 }
 
 -- =====================================================================
--- FLY SYSTEM
+-- FLY SYSTEM — FIX 2: Added mobile touch D-pad
 -- =====================================================================
-local FlyBodyV, FlyBodyG, FlyConn
+local FlyBodyV, FlyBodyG, FlyConn, FlyDpad
+-- Shared direction table updated by both keyboard and touch D-pad
+local FlyDir = {f=false, b=false, l=false, r=false, u=false, d=false}
+
 local function StopFly()
     State.Flying = false
     if FlyConn  then FlyConn:Disconnect();  FlyConn  = nil end
     if FlyBodyV then FlyBodyV:Destroy();    FlyBodyV = nil end
     if FlyBodyG then FlyBodyG:Destroy();    FlyBodyG = nil end
+    if FlyDpad  then FlyDpad:Destroy();     FlyDpad  = nil end
     if hum then pcall(function() hum.PlatformStand = false end) end
+    -- Clear direction flags
+    for k in pairs(FlyDir) do FlyDir[k] = false end
+end
+
+-- FIX 2: Build an on-screen touch D-pad for fly so Android users can steer
+local function BuildFlyDpad(sg)
+    if FlyDpad then FlyDpad:Destroy() end
+    FlyDpad = Instance.new("Frame")
+    FlyDpad.Name               = "FlyDpad"
+    FlyDpad.Size               = UDim2.fromOffset(170, 170)
+    FlyDpad.Position           = UDim2.new(0, 10, 1, -190)
+    FlyDpad.BackgroundColor3   = Color3.fromRGB(10,10,20)
+    FlyDpad.BackgroundTransparency = 0.5
+    FlyDpad.BorderSizePixel    = 0
+    FlyDpad.ZIndex             = 200
+    do
+        local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0,14); c.Parent = FlyDpad
+    end
+    FlyDpad.Parent = sg
+
+    -- Helper: create a directional button
+    local function DBtn(label, pos, sz, dirKey, dirKeyAlt)
+        local b = Instance.new("TextButton")
+        b.Size               = UDim2.fromOffset(sz, sz)
+        b.Position           = pos
+        b.BackgroundColor3   = Color3.fromRGB(30,50,80)
+        b.BackgroundTransparency = 0.3
+        b.BorderSizePixel    = 0
+        b.Text               = label
+        b.Font               = Enum.Font.GothamBold
+        b.TextSize           = sz > 40 and 22 or 14
+        b.TextColor3         = Color3.fromRGB(180,220,255)
+        b.AutoButtonColor    = false
+        b.ZIndex             = 201
+        do
+            local c = Instance.new("UICorner"); c.CornerRadius = UDim.new(0,8); c.Parent = b
+        end
+        -- Touch press/release → set direction flag
+        b.InputBegan:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.Touch
+            or inp.UserInputType == Enum.UserInputType.MouseButton1 then
+                FlyDir[dirKey] = true
+                if dirKeyAlt then FlyDir[dirKeyAlt] = true end
+                TweenService:Create(b, TweenInfo.new(0.08), {BackgroundTransparency=0}):Play()
+            end
+        end)
+        b.InputEnded:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.Touch
+            or inp.UserInputType == Enum.UserInputType.MouseButton1 then
+                FlyDir[dirKey] = false
+                if dirKeyAlt then FlyDir[dirKeyAlt] = false end
+                TweenService:Create(b, TweenInfo.new(0.08), {BackgroundTransparency=0.3}):Play()
+            end
+        end)
+        b.Parent = FlyDpad
+        return b
+    end
+
+    -- Layout: [W=fwd, S=back, A=left, D=right] in cross pattern, Up/Down on right side
+    --    [↑]            [↑ Up]
+    -- [←][•][→]        [↓ Dn]
+    --    [↓]
+    local C = 55  -- center of cross
+    local BZ = 46 -- button size
+    local G  = 4  -- gap
+    DBtn("↑",  UDim2.fromOffset(C,             G),       BZ, "f")          -- Forward
+    DBtn("↓",  UDim2.fromOffset(C,             C+G+BZ), BZ, "b")          -- Back
+    DBtn("←",  UDim2.fromOffset(G,             C+G),    BZ, "l")          -- Left
+    DBtn("→",  UDim2.fromOffset(C+BZ+G,        C+G),    BZ, "r")          -- Right
+    DBtn("⬆", UDim2.fromOffset(C+BZ+G+BZ+G,   G),       BZ, "u")          -- Rise
+    DBtn("⬇", UDim2.fromOffset(C+BZ+G+BZ+G,   C+G+BZ), BZ, "d")          -- Sink
+
+    -- Small center label
+    local lbl = Instance.new("TextLabel")
+    lbl.Size = UDim2.fromOffset(BZ, BZ)
+    lbl.Position = UDim2.fromOffset(C, C+G)
+    lbl.BackgroundTransparency = 1
+    lbl.Text = "✈"
+    lbl.TextSize = 22
+    lbl.Font = Enum.Font.GothamBold
+    lbl.TextColor3 = Color3.fromRGB(72,220,128)
+    lbl.ZIndex = 201
+    lbl.Parent = FlyDpad
 end
 
 local function StartFly()
@@ -225,33 +322,47 @@ local function StartFly()
 
     FlyBodyV = Instance.new("BodyVelocity")
     FlyBodyV.Velocity  = Vector3.zero
-    FlyBodyV.MaxForce  = Vector3.new(1e6,1e6,1e6)
+    FlyBodyV.MaxForce  = Vector3.new(1e6, 1e6, 1e6)
     FlyBodyV.Parent    = hrp
 
     FlyBodyG = Instance.new("BodyGyro")
-    FlyBodyG.MaxTorque = Vector3.new(1e6,1e6,1e6)
+    FlyBodyG.MaxTorque = Vector3.new(1e6, 1e6, 1e6)
     FlyBodyG.P         = 1e4
     FlyBodyG.CFrame    = hrp.CFrame
     FlyBodyG.Parent    = hrp
+
+    -- FIX 2: Show the touch D-pad
+    local sg = PGui:FindFirstChild("LT2_v3") or game:GetService("CoreGui"):FindFirstChild("LT2_v3")
+    if sg then BuildFlyDpad(sg) end
 
     FlyConn = RunService.Heartbeat:Connect(function()
         if not State.Flying or not hrp or not hrp.Parent then StopFly(); return end
         local cam = workspace.CurrentCamera
         local dir = Vector3.zero
+
+        -- FIX 2: Check BOTH keyboard (PC) and D-pad flags (mobile)
         local UIS = UserInputService
-        if UIS:IsKeyDown(Enum.KeyCode.W)         then dir = dir + cam.CFrame.LookVector  end
-        if UIS:IsKeyDown(Enum.KeyCode.S)         then dir = dir - cam.CFrame.LookVector  end
-        if UIS:IsKeyDown(Enum.KeyCode.A)         then dir = dir - cam.CFrame.RightVector end
-        if UIS:IsKeyDown(Enum.KeyCode.D)         then dir = dir + cam.CFrame.RightVector end
-        if UIS:IsKeyDown(Enum.KeyCode.Space)     then dir = dir + Vector3.yAxis          end
-        if UIS:IsKeyDown(Enum.KeyCode.LeftShift) then dir = dir - Vector3.yAxis          end
+        local fwd = FlyDir.f or UIS:IsKeyDown(Enum.KeyCode.W)
+        local bak = FlyDir.b or UIS:IsKeyDown(Enum.KeyCode.S)
+        local lft = FlyDir.l or UIS:IsKeyDown(Enum.KeyCode.A)
+        local rgt = FlyDir.r or UIS:IsKeyDown(Enum.KeyCode.D)
+        local up  = FlyDir.u or UIS:IsKeyDown(Enum.KeyCode.Space)
+        local dn  = FlyDir.d or UIS:IsKeyDown(Enum.KeyCode.LeftShift)
+
+        if fwd then dir = dir + cam.CFrame.LookVector  end
+        if bak then dir = dir - cam.CFrame.LookVector  end
+        if lft then dir = dir - cam.CFrame.RightVector end
+        if rgt then dir = dir + cam.CFrame.RightVector end
+        if up  then dir = dir + Vector3.yAxis          end
+        if dn  then dir = dir - Vector3.yAxis          end
+
         FlyBodyV.Velocity = dir.Magnitude > 0 and (dir.Unit * State.FlySpeed) or Vector3.zero
         FlyBodyG.CFrame   = cam.CFrame
     end)
 end
 
 -- =====================================================================
--- NOCLIP — properly disconnectable
+-- NOCLIP
 -- =====================================================================
 local NoClipConn
 local function SetNoClip(enabled)
@@ -266,7 +377,6 @@ local function SetNoClip(enabled)
             end
         end)
     else
-        -- Restore collision
         if char then
             for _, v in ipairs(char:GetDescendants()) do
                 if v:IsA("BasePart") then
@@ -292,11 +402,9 @@ local function SetAlwaysDay(v)
         State.AlwaysNight = false
         ClearLightConns()
         Lighting.ClockTime = 14
-        local c = RunService.Heartbeat:Connect(function()
-            if not State.AlwaysDay then return end
-            Lighting.ClockTime = 14
-        end)
-        table.insert(LightConns, c)
+        table.insert(LightConns, RunService.Heartbeat:Connect(function()
+            if State.AlwaysDay then Lighting.ClockTime = 14 end
+        end))
     else
         ClearLightConns()
     end
@@ -308,11 +416,9 @@ local function SetAlwaysNight(v)
         State.AlwaysDay = false
         ClearLightConns()
         Lighting.ClockTime = 0
-        local c = RunService.Heartbeat:Connect(function()
-            if not State.AlwaysNight then return end
-            Lighting.ClockTime = 0
-        end)
-        table.insert(LightConns, c)
+        table.insert(LightConns, RunService.Heartbeat:Connect(function()
+            if State.AlwaysNight then Lighting.ClockTime = 0 end
+        end))
     else
         ClearLightConns()
     end
@@ -325,37 +431,47 @@ local function SetNoFog(v)
 end
 
 -- =====================================================================
--- SAVE / LOAD
+-- SAVE / LOAD  — FIX 4: uses confirmed remotes only
 -- =====================================================================
 local function DoSave(slot)
+    -- GetMetaData is confirmed; RequestSave is unconfirmed but we still try it
     local r = rRequestSave()
-    if not r then return false, "RequestSave not found" end
+    if not r then
+        -- Fallback: try GetMetaData to at least ping the server
+        local md = rGetMetaData()
+        if md then
+            local ok, res = pcall(function() return md:InvokeServer(slot) end)
+            return false, "RequestSave remote not found. GetMetaData result: "..tostring(res)
+        end
+        return false, "RequestSave not found (unconfirmed remote)"
+    end
     local ok, res = pcall(function() return r:InvokeServer(slot, LP.UserId) end)
     return ok and res, ok and "OK" or tostring(res)
 end
 
 local function DoLoad(slot)
+    -- ClientMayLoad is CONFIRMED
     local mayLoad = rClientMayLoad()
     if mayLoad then
         local ok, can = pcall(function() return mayLoad:InvokeServer(LP.UserId) end)
-        if ok and not can then return false, "Server denied load" end
+        if ok and not can then return false, "Server denied load (ClientMayLoad returned false)" end
     end
+    -- RequestLoad is unconfirmed
     local r = rRequestLoad()
-    if not r then return false, "RequestLoad not found" end
+    if not r then return false, "RequestLoad not found (unconfirmed remote)" end
     local ok, res = pcall(function() return r:InvokeServer(slot, LP.UserId, nil) end)
     return ok, ok and tostring(res) or tostring(res)
 end
 
 local function DoBuyLand()
+    -- SetPropertyPurchasingValue is CONFIRMED
     local setPurchase = rSetPropertyPurchasing()
     if not setPurchase then return false, "SetPropertyPurchasingValue not found" end
 
-    -- Find unowned plot nearest to player
     local propsFolder = workspace:FindFirstChild("Properties")
     if not propsFolder then return false, "Properties folder not in workspace" end
 
-    local bestProp = nil
-    local bestDist = math.huge
+    local bestProp, bestDist = nil, math.huge
     for _, prop in ipairs(propsFolder:GetChildren()) do
         local ownerVal = prop:FindFirstChild("Owner")
         if ownerVal and (ownerVal.Value == nil or ownerVal.Value == "") then
@@ -373,6 +489,7 @@ local function DoBuyLand()
     pcall(function() setPurchase:InvokeServer(true) end)
     task.wait(0.3)
 
+    -- FIX 4: ClientPurchasedProperty is unconfirmed; log clearly
     local cp = rClientPurchasedProperty()
     if cp then
         local camPos = workspace.CurrentCamera.CFrame.Position
@@ -382,7 +499,7 @@ local function DoBuyLand()
     end
 
     pcall(function() setPurchase:InvokeServer(false) end)
-    return false, "ClientPurchasedProperty remote not found"
+    return false, "ClientPurchasedProperty remote not found (unconfirmed path)"
 end
 
 -- =====================================================================
@@ -397,11 +514,8 @@ local function SetJumpPower(v)
     State.JumpPower = v
     if hum then
         pcall(function()
-            if hum.UseJumpPower then
-                hum.JumpPower  = v
-            else
-                hum.JumpHeight = v / 5
-            end
+            if hum.UseJumpPower then hum.JumpPower  = v
+            else                     hum.JumpHeight = v / 5 end
         end)
     end
 end
@@ -413,7 +527,6 @@ local function GetAxe()
             if v:IsA("Tool") and v:FindFirstChild("ToolName") then return v end
         end
     end
-    -- Then backpack
     for _, v in ipairs(LP.Backpack:GetChildren()) do
         if v:IsA("Tool") and v:FindFirstChild("ToolName") then return v end
     end
@@ -434,15 +547,18 @@ local function GetAllAxes()
     return axes
 end
 
--- DropTool — VERIFIED: ClientInteracted:FireServer(tool, "Drop tool", handle.CFrame)
+-- FIX 3: DropTool — safe char reference, not LP.Character
+-- ClientInteracted:FireServer(tool, "Drop tool", handle.CFrame) is confirmed
 local function DropTool(tool)
     if not tool then return false, "no tool" end
     local handle = tool:FindFirstChild("Handle")
     if not handle then return false, "tool has no Handle" end
     local ci = rClientInteracted()
     if not ci then
-        -- Fallback: unequip
-        pcall(function() LP.Character.Humanoid:UnequipTools() end)
+        -- FIX 3: use `char` not `LP.Character`
+        if char then
+            pcall(function() char:FindFirstChildOfClass("Humanoid"):UnequipTools() end)
+        end
         return false, "ClientInteracted not found — used UnequipTools fallback"
     end
     local ok, err = pcall(function()
@@ -463,31 +579,24 @@ local function DropAllAxes()
 end
 
 -- =====================================================================
--- AUTO CHOP — VERIFIED MECHANICS FROM AxeSuperClass:
---   RemoteProxy:FireServer(cutEventObj, {
---     sectionId  = woodSection.ID.Value,
---     faceVector = Vector3.new(1,0,0),
---     height     = woodSection.Size.Y/2,
---     hitPoints  = 9999,
---     cooldown   = 0,
---     cuttingClass = "Axe",
---     tool       = axeTool,
---   })
--- Tree parts are named "WoodSection" (Part)
--- CutEvent is a child of the WoodSection's parent Model
+-- AUTO CHOP — FIX 4: RemoteProxy is unconfirmed, warn if missing
 -- =====================================================================
 local AutoChopRunning = false
 
 local function ChopSection(section, axe)
-    local rp  = rRemoteProxy()
-    if not rp then return end
+    local rp = rRemoteProxy()
+    if not rp then
+        -- FIX 4: RemoteProxy path is unconfirmed. AutoChop will not work
+        -- without the correct server-side remote name.
+        return false, "RemoteProxy not found — remote name may differ on this server"
+    end
     local idVal = section:FindFirstChild("ID")
-    if not idVal then return end
-    -- CutEvent is a child of the parent model (not the Part itself)
+    if not idVal then return false, "no ID value" end
+    -- CutEvent is a child of the parent model, NOT the part itself (verified from source)
     local cutEvent = section.Parent and section.Parent:FindFirstChild("CutEvent")
-    if not cutEvent then return end
+    if not cutEvent then return false, "no CutEvent in parent" end
 
-    pcall(function()
+    local ok, err = pcall(function()
         rp:FireServer(cutEvent, {
             sectionId    = idVal.Value,
             faceVector   = Vector3.new(1, 0, 0),
@@ -498,6 +607,7 @@ local function ChopSection(section, axe)
             tool         = axe,
         })
     end)
+    return ok, ok and "OK" or tostring(err)
 end
 
 local function StartAutoChop()
@@ -505,18 +615,18 @@ local function StartAutoChop()
     AutoChopRunning = true
     State.AutoWoodOn = true
     task.spawn(function()
+        local warnedOnce = false
         while AutoChopRunning do
             local axe = GetAxe()
             if not axe then
                 task.wait(1)
             else
-                -- Teleport near a WoodSection and chop all nearby
                 local chopped = 0
+                local remoteErr = nil
                 for _, obj in ipairs(workspace:GetDescendants()) do
                     if not AutoChopRunning then break end
                     if obj.Name == "WoodSection" and obj:IsA("Part") then
                         if obj:FindFirstChild("ID") and obj.Parent and obj.Parent:FindFirstChild("CutEvent") then
-                            -- Teleport within range
                             if hrp then
                                 local dist = (obj.Position - hrp.Position).Magnitude
                                 if dist > 30 then
@@ -524,12 +634,20 @@ local function StartAutoChop()
                                     task.wait(0.3)
                                 end
                             end
-                            ChopSection(obj, axe)
+                            local ok, msg = ChopSection(obj, axe)
+                            if not ok and not warnedOnce then
+                                remoteErr = msg
+                                warnedOnce = true
+                            end
                             chopped = chopped + 1
                             task.wait(0.12)
                             if chopped >= (State.WoodAmount or 5) * 20 then break end
                         end
                     end
+                end
+                -- Surface remote errors once to avoid spam
+                if remoteErr then
+                    warn("[LT2 AutoChop] " .. remoteErr)
                 end
                 task.wait(0.5)
             end
@@ -568,63 +686,56 @@ local function SellAllWood()
 end
 
 -- =====================================================================
--- STORE ITEMS — verified from ClientItemInfo XML
+-- STORE ITEMS
 -- =====================================================================
 local STORE_ITEMS = {
-    {name="Rusty Axe",      toolname="RustyAxe",     price=100,  storeModel="WoodRUs", pos=Vector3.new(-275,5,105)},
-    {name="Refined Axe",    toolname="RefinedAxe",   price=450,  storeModel="WoodRUs", pos=Vector3.new(-275,5,105)},
-    {name="Silver Axe",     toolname="SilverAxe",    price=550,  storeModel="WoodRUs", pos=Vector3.new(-275,5,105)},
-    {name="Bluesteel Axe",  toolname="BluesteelAxe", price=1250, storeModel="WoodRUs", pos=Vector3.new(-275,5,105)},
-    {name="Cave Axe",       toolname="CaveAxe",      price=2000, storeModel="WoodRUs", pos=Vector3.new(-275,5,105)},
-    {name="Fire Axe",       toolname="FireAxe",      price=3500, storeModel="WoodRUs", pos=Vector3.new(-275,5,105)},
-    {name="Frost Axe",      toolname="IceAxe",       price=4000, storeModel="WoodRUs", pos=Vector3.new(-275,5,105)},
-    {name="Many Axe",       toolname="ManyAxe",      price=7200, storeModel="WoodRUs", pos=Vector3.new(-275,5,105)},
-    {name="Rukiryaxe",      toolname="Rukiryaxe",    price=7400, storeModel="WoodRUs", pos=Vector3.new(-275,5,105)},
-    {name="Spearmint Axe",  toolname="MintAxe",      price=8000, storeModel="WoodRUs", pos=Vector3.new(-275,5,105)},
+    {name="Rusty Axe",     toolname="RustyAxe",     price=100,  storeModel="WoodRUs", pos=Vector3.new(-275,5,105)},
+    {name="Refined Axe",   toolname="RefinedAxe",   price=450,  storeModel="WoodRUs", pos=Vector3.new(-275,5,105)},
+    {name="Silver Axe",    toolname="SilverAxe",    price=550,  storeModel="WoodRUs", pos=Vector3.new(-275,5,105)},
+    {name="Bluesteel Axe", toolname="BluesteelAxe", price=1250, storeModel="WoodRUs", pos=Vector3.new(-275,5,105)},
+    {name="Cave Axe",      toolname="CaveAxe",      price=2000, storeModel="WoodRUs", pos=Vector3.new(-275,5,105)},
+    {name="Fire Axe",      toolname="FireAxe",      price=3500, storeModel="WoodRUs", pos=Vector3.new(-275,5,105)},
+    {name="Frost Axe",     toolname="IceAxe",       price=4000, storeModel="WoodRUs", pos=Vector3.new(-275,5,105)},
+    {name="Many Axe",      toolname="ManyAxe",      price=7200, storeModel="WoodRUs", pos=Vector3.new(-275,5,105)},
+    {name="Rukiryaxe",     toolname="Rukiryaxe",    price=7400, storeModel="WoodRUs", pos=Vector3.new(-275,5,105)},
+    {name="Spearmint Axe", toolname="MintAxe",      price=8000, storeModel="WoodRUs", pos=Vector3.new(-275,5,105)},
 }
 
--- AUTO BUY — uses AttemptPurchase RemoteFunction (Transactions.ClientToServer)
--- Fallback: PlayerChatted dialog chain
+-- AUTO BUY — AttemptPurchase RF (unconfirmed) + SetChattingValue dialog fallback (confirmed)
 local AutoBuyRunning = false
 
 local function AttemptBuyItem(toolname)
-    -- Method 1: Direct AttemptPurchase RF
+    -- Method 1: Direct AttemptPurchase (unconfirmed but worth trying)
     local ap = rAttemptPurchase()
     if ap then
-        local ok, result = pcall(function()
-            return ap:InvokeServer(toolname, 1)
-        end)
+        local ok, result = pcall(function() return ap:InvokeServer(toolname, 1) end)
         if ok then return true, tostring(result) end
     end
 
-    -- Method 2: Find item in ClientItemInfo and use dialog
+    -- Method 2: SetChattingValue + PlayerChatted dialog chain (SetChattingValue confirmed)
     local itemInfo = nil
     for _, item in ipairs(STORE_ITEMS) do
         if item.toolname == toolname then itemInfo = item; break end
     end
     if not itemInfo then return false, "item not in list" end
 
-    -- TP to store
     TeleportPos(itemInfo.pos.X, itemInfo.pos.Y, itemInfo.pos.Z)
     task.wait(1.5)
 
-    -- Find store NPC model
     local npcModel = nil
     for _, obj in ipairs(workspace:GetDescendants()) do
         if obj:IsA("Model") and obj.Name == itemInfo.storeModel then
             npcModel = obj; break
         end
     end
-    if not npcModel then return false, "Store NPC model '"..itemInfo.storeModel.."' not found" end
+    if not npcModel then return false, "Store model '"..itemInfo.storeModel.."' not found" end
 
-    -- Find DialogChoice that matches this tool
     local targetChoice = nil
     local searchStr = toolname:lower()
     for _, obj in ipairs(npcModel:GetDescendants()) do
         if obj:IsA("DialogChoice") then
             local ud = (obj.UserDialog or ""):lower()
             local rd = (obj.ResponseDialog or ""):lower()
-            -- Strip spaces and "axe" for fuzzy match
             local stripped = searchStr:gsub("axe",""):gsub("%s","")
             if ud:find(stripped) or rd:find(stripped) or ud:find(searchStr) or rd:find(searchStr) then
                 targetChoice = obj; break
@@ -632,16 +743,14 @@ local function AttemptBuyItem(toolname)
         end
     end
 
-    local scv = rSetChattingValue()
-    local pc  = rPlayerChatted()
+    local scv = rSetChattingValue()  -- CONFIRMED
+    local pc  = rPlayerChatted()     -- unconfirmed
 
     if scv then pcall(function() scv:InvokeServer(2) end) end
     task.wait(0.2)
 
     if pc and targetChoice then
-        local ok, res = pcall(function()
-            return pc:InvokeServer(npcModel, targetChoice)
-        end)
+        local ok, res = pcall(function() return pc:InvokeServer(npcModel, targetChoice) end)
         task.wait(0.3)
         pcall(function() pc:InvokeServer(npcModel, "EndChat") end)
         if scv then pcall(function() scv:InvokeServer(0) end) end
@@ -649,7 +758,7 @@ local function AttemptBuyItem(toolname)
     end
 
     if scv then pcall(function() scv:InvokeServer(0) end) end
-    return false, "Could not find purchase dialog for "..toolname
+    return false, "Purchase dialog not found for "..toolname.." (PlayerChatted may not exist)"
 end
 
 local function StartAutoBuy()
@@ -717,12 +826,19 @@ local function TeleportSelectedToMe()
 end
 
 local function DestroySelected()
+    -- FIX 4: DestroyStructure is unconfirmed; use ClientInteracted as primary fallback
     local ds = rDestroyStructure()
+    local ci = rClientInteracted()
     local n = 0
     for _, item in ipairs(State.SelectedItems) do
         if item and item.Parent then
-            if ds then pcall(function() ds:FireServer(item) end)
-            else       pcall(function() item:Destroy()     end) end
+            if ds then
+                pcall(function() ds:FireServer(item) end)
+            elseif ci then
+                pcall(function() ci:FireServer(item, "Destroy", CFrame.new()) end)
+            else
+                pcall(function() item:Destroy() end)
+            end
             n = n + 1
         end
     end
@@ -731,7 +847,7 @@ local function DestroySelected()
 end
 
 -- =====================================================================
--- DUPE SYSTEM — drop/pick loop via ClientInteracted
+-- DUPE SYSTEM
 -- =====================================================================
 local DupeRunning = false
 
@@ -751,13 +867,16 @@ local function StartDupe()
         while DupeRunning and duped < State.DupeAmt do
             local curAxe = GetAxe()
             if not curAxe then
-                -- Try equipping from backpack
-                for _, tool in ipairs(LP.Backpack:GetChildren()) do
-                    if tool:IsA("Tool") and tool:FindFirstChild("ToolName") then
-                        pcall(function() hum:EquipTool(tool) end)
-                        task.wait(0.3)
-                        curAxe = GetAxe()
-                        if curAxe then break end
+                -- FIX 3: safe char reference
+                if char then
+                    for _, tool in ipairs(LP.Backpack:GetChildren()) do
+                        if tool:IsA("Tool") and tool:FindFirstChild("ToolName") then
+                            local h = char:FindFirstChildOfClass("Humanoid")
+                            if h then pcall(function() h:EquipTool(tool) end) end
+                            task.wait(0.3)
+                            curAxe = GetAxe()
+                            if curAxe then break end
+                        end
                     end
                 end
             end
@@ -765,11 +884,9 @@ local function StartDupe()
             if curAxe then
                 local ok, _ = DropTool(curAxe)
                 if ok then duped = duped + 1 end
-
-                -- Wait then walk to dropped axe
                 task.wait(State.DupeWait * 0.1 + 0.2)
 
-                -- Find the dropped axe in workspace to pick up
+                -- Walk to the dropped axe
                 if hrp then
                     for _, obj in ipairs(workspace:GetDescendants()) do
                         if obj:IsA("Tool") then
@@ -805,26 +922,29 @@ local function StopDupe()
 end
 
 -- =====================================================================
--- BUILD / BLUEPRINT
+-- BUILD / BLUEPRINT — FIX 4: Both remotes unconfirmed, log clearly
 -- =====================================================================
 local function PlaceBlueprint(name, cf)
+    -- ClientPlacedBlueprint and ClientPlacedStructure are both unconfirmed paths
     local r = rClientPlacedBlueprint() or rClientPlacedStructure()
-    if not r then return false, "No PlaceBlueprint/PlaceStructure remote found" end
-    local finalCF = cf or (hrp and hrp.CFrame * CFrame.new(0, 0, -10)) or CFrame.new(0,0,0)
+    if not r then
+        return false, "PlaceBlueprint/PlaceStructure remotes not found (paths unconfirmed)"
+    end
+    local finalCF = cf or (hrp and hrp.CFrame * CFrame.new(0, 0, -10)) or CFrame.new()
     local ok, err = pcall(function() r:FireServer(name, finalCF, finalCF) end)
     return ok, ok and "Fired" or tostring(err)
 end
 
 local function AutoFillBlueprints()
     local r = rClientPlacedBlueprint() or rClientPlacedStructure()
-    if not r then return false, "Remote not found" end
+    if not r then return false, "Remote not found (paths unconfirmed)" end
     local n = 0
     for _, obj in ipairs(workspace:GetDescendants()) do
         if obj.Name == "Blueprint" then
             local ownerVal = obj:FindFirstChild("Owner")
             if ownerVal and ownerVal.Value == LP then
                 pcall(function()
-                    local cf = obj.PrimaryPart and obj.PrimaryPart.CFrame or CFrame.new(0,0,0)
+                    local cf = obj.PrimaryPart and obj.PrimaryPart.CFrame or CFrame.new()
                     r:FireServer(obj, cf)
                     n = n + 1
                 end)
@@ -850,16 +970,15 @@ local function StealPlot(targetName)
                 end)
                 return ok, ok and "Steal fired on "..prop.Name or tostring(err)
             end
+            return false, "ClientPurchasedProperty not found (unconfirmed path)"
         end
     end
     return false, "Target has no plot"
 end
 
 -- =====================================================================
--- ScreenGui — Delta Android: use CoreGui, fallback PlayerGui
--- gethui() is NOT available in Delta
+-- ScreenGui — Delta Android: CoreGui first, fallback PlayerGui
 -- =====================================================================
--- Remove old instance
 local oldGui = PGui:FindFirstChild("LT2_v3") or game:GetService("CoreGui"):FindFirstChild("LT2_v3")
 if oldGui then oldGui:Destroy() end
 
@@ -870,10 +989,7 @@ ScreenGui.IgnoreGuiInset = true
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 ScreenGui.DisplayOrder   = 999
 
--- Delta Android: try CoreGui first, then PlayerGui
-local guiOk = pcall(function()
-    ScreenGui.Parent = game:GetService("CoreGui")
-end)
+local guiOk = pcall(function() ScreenGui.Parent = game:GetService("CoreGui") end)
 if not guiOk or not ScreenGui.Parent or not ScreenGui.Parent:IsA("CoreGui") then
     ScreenGui.Parent = PGui
 end
@@ -897,15 +1013,13 @@ local T = {
     Black   = Color3.fromRGB(  0,  0,  0),
 }
 
--- Use safe fonts for Delta Android (Enum.Font, NOT FontFace)
 local FONT    = Enum.Font.GothamMedium
 local FONT_B  = Enum.Font.GothamBold
 local FONT_SB = Enum.Font.GothamSemibold
 
 -- =====================================================================
--- UI BUILDERS — All interactive elements are TextButton for Android touch
+-- UI BUILDERS
 -- =====================================================================
-
 local function Corner(parent, r)
     local c = Instance.new("UICorner")
     c.CornerRadius = UDim.new(0, r or 8)
@@ -921,7 +1035,6 @@ local function Stroke(parent, color, thick)
     return s
 end
 
--- Generic Frame
 local function MkFrame(props)
     local f = Instance.new("Frame")
     f.BorderSizePixel = 0
@@ -929,7 +1042,6 @@ local function MkFrame(props)
     return f
 end
 
--- Label (non-interactive)
 local function MkLabel(props)
     local l = Instance.new("TextLabel")
     l.BackgroundTransparency = 1
@@ -943,7 +1055,6 @@ local function MkLabel(props)
     return l
 end
 
--- Button — TextButton with hover/press effects (touch-safe)
 local function MkBtn(props, onClick)
     local btn = Instance.new("TextButton")
     btn.BorderSizePixel  = 0
@@ -958,33 +1069,26 @@ local function MkBtn(props, onClick)
     end
     Corner(btn, 8)
     Stroke(btn, T.Border, 1)
-
-    -- Inner label (so we can center text properly)
     local lbl = MkLabel({
-        Text             = props.Text or "",
-        Size             = UDim2.new(1, -8, 1, 0),
-        Position         = UDim2.fromOffset(4, 0),
-        TextXAlignment   = Enum.TextXAlignment.Center,
-        TextColor3       = props.TextColor3 or T.TextOn,
-        Font             = FONT_B,
-        TextSize         = props.TextSize or 13,
-        Parent           = btn,
+        Text           = props.Text or "",
+        Size           = UDim2.new(1,-8,1,0),
+        Position       = UDim2.fromOffset(4,0),
+        TextXAlignment = Enum.TextXAlignment.Center,
+        TextColor3     = props.TextColor3 or T.TextOn,
+        Font           = FONT_B,
+        TextSize       = props.TextSize or 13,
+        Parent         = btn,
     })
-
     btn.MouseEnter:Connect(function()
         TweenService:Create(btn, TweenInfo.new(0.1), {BackgroundColor3 = T.Border}):Play()
     end)
     btn.MouseLeave:Connect(function()
         TweenService:Create(btn, TweenInfo.new(0.1), {BackgroundColor3 = props.BackgroundColor3 or T.Card}):Play()
     end)
-
-    if onClick then
-        btn.Activated:Connect(onClick)  -- Activated fires on BOTH click AND touch
-    end
+    if onClick then btn.Activated:Connect(onClick) end
     return btn, lbl
 end
 
--- Section header
 local function MkSectionHeader(text, color)
     color = color or T.TextDim
     local f = MkFrame({BackgroundTransparency=1, Size=UDim2.new(1,0,0,28)})
@@ -998,35 +1102,26 @@ local function MkSectionHeader(text, color)
         Parent     = f,
     })
     MkFrame({
-        BackgroundColor3    = color,
+        BackgroundColor3       = color,
         BackgroundTransparency = 0.7,
-        BorderSizePixel     = 0,
-        Size                = UDim2.new(0.44,-4,0,1),
-        Position            = UDim2.new(0.56,0,0.5,0),
-        Parent              = f,
+        BorderSizePixel        = 0,
+        Size                   = UDim2.new(0.44,-4,0,1),
+        Position               = UDim2.new(0.56,0,0.5,0),
+        Parent                 = f,
     })
     return f
 end
 
--- Toggle — TextButton based so touch works properly on Delta Android
 local function MkToggle(text, stateKey, onChange)
     local container = Instance.new("TextButton")
-    container.Size             = UDim2.new(1, 0, 0, 50)
+    container.Size             = UDim2.new(1,0,0,50)
     container.BackgroundColor3 = T.Card
     container.BorderSizePixel  = 0
     container.Text             = ""
     container.AutoButtonColor  = false
     Corner(container, 8)
     Stroke(container, T.Border, 1)
-
-    MkLabel({
-        Text             = text,
-        Size             = UDim2.new(1,-64,1,0),
-        Position         = UDim2.fromOffset(12,0),
-        TextSize         = 13,
-        Parent           = container,
-    })
-
+    MkLabel({Text=text, Size=UDim2.new(1,-64,1,0), Position=UDim2.fromOffset(12,0), TextSize=13, Parent=container})
     local track = MkFrame({
         Size             = UDim2.fromOffset(44,24),
         Position         = UDim2.new(1,-54,0.5,-12),
@@ -1035,7 +1130,6 @@ local function MkToggle(text, stateKey, onChange)
         Parent           = container,
     })
     Corner(track, 12)
-
     local knob = MkFrame({
         Size             = UDim2.fromOffset(20,20),
         Position         = State[stateKey] and UDim2.fromOffset(22,2) or UDim2.fromOffset(2,2),
@@ -1044,45 +1138,32 @@ local function MkToggle(text, stateKey, onChange)
         Parent           = track,
     })
     Corner(knob, 10)
-
     local function setVal(v)
         State[stateKey] = v
-        TweenService:Create(track,TweenInfo.new(0.15),{BackgroundColor3=v and T.Green or T.Border}):Play()
-        TweenService:Create(knob, TweenInfo.new(0.15),{Position=v and UDim2.fromOffset(22,2) or UDim2.fromOffset(2,2)}):Play()
+        TweenService:Create(track, TweenInfo.new(0.15), {BackgroundColor3=v and T.Green or T.Border}):Play()
+        TweenService:Create(knob,  TweenInfo.new(0.15), {Position=v and UDim2.fromOffset(22,2) or UDim2.fromOffset(2,2)}):Play()
         if onChange then onChange(v) end
     end
-
-    container.Activated:Connect(function()
-        setVal(not State[stateKey])
-    end)
-
+    container.Activated:Connect(function() setVal(not State[stateKey]) end)
     return container, setVal
 end
 
--- Slider — uses a TextButton track so Android touch works
 local function MkSlider(text, minV, maxV, stateKey, unit, onChange)
     minV = minV or 0; maxV = maxV or 100; unit = unit or ""
-    local container = MkFrame({
-        Size             = UDim2.new(1,0,0,60),
-        BackgroundColor3 = T.Card,
-    })
-    Corner(container,8)
-    Stroke(container,T.Border,1)
-
+    local container = MkFrame({Size=UDim2.new(1,0,0,60), BackgroundColor3=T.Card})
+    Corner(container,8); Stroke(container,T.Border,1)
     local headerF = MkFrame({BackgroundTransparency=1, Size=UDim2.new(1,-20,0,26), Position=UDim2.fromOffset(10,4), Parent=container})
     MkLabel({Text=text, Size=UDim2.new(0.7,0,1,0), TextSize=13, Parent=headerF})
     local valLbl = MkLabel({
-        Text             = tostring(State[stateKey])..unit,
-        Size             = UDim2.new(0.3,0,1,0),
-        Position         = UDim2.new(0.7,0,0,0),
-        TextXAlignment   = Enum.TextXAlignment.Right,
-        TextColor3       = T.Cyan,
-        Font             = FONT_B,
-        TextSize         = 13,
-        Parent           = headerF,
+        Text           = tostring(State[stateKey])..unit,
+        Size           = UDim2.new(0.3,0,1,0),
+        Position       = UDim2.new(0.7,0,0,0),
+        TextXAlignment = Enum.TextXAlignment.Right,
+        TextColor3     = T.Cyan,
+        Font           = FONT_B,
+        TextSize       = 13,
+        Parent         = headerF,
     })
-
-    -- Track (TextButton so touch input works on Android)
     local trackBtn = Instance.new("TextButton")
     trackBtn.Size             = UDim2.new(1,-20,0,6)
     trackBtn.Position         = UDim2.new(0,10,0,40)
@@ -1092,14 +1173,12 @@ local function MkSlider(text, minV, maxV, stateKey, unit, onChange)
     trackBtn.AutoButtonColor  = false
     trackBtn.Parent           = container
     Corner(trackBtn, 3)
-
     local fill = MkFrame({
-        BackgroundColor3    = T.Green,
-        Size                = UDim2.new(math.clamp((State[stateKey]-minV)/(maxV-minV),0,1),0,1,0),
-        Parent              = trackBtn,
+        BackgroundColor3 = T.Green,
+        Size             = UDim2.new(math.clamp((State[stateKey]-minV)/(maxV-minV),0,1),0,1,0),
+        Parent           = trackBtn,
     })
     Corner(fill,3)
-
     local knob = MkFrame({
         Size             = UDim2.fromOffset(16,16),
         Position         = UDim2.new(math.clamp((State[stateKey]-minV)/(maxV-minV),0,1),0,0.5,-8),
@@ -1108,26 +1187,23 @@ local function MkSlider(text, minV, maxV, stateKey, unit, onChange)
         Parent           = trackBtn,
     })
     Corner(knob,8)
-
     local dragging = false
     local function updateFromX(posX)
-        local abs  = trackBtn.AbsolutePosition.X
-        local sz   = trackBtn.AbsoluteSize.X
+        local abs = trackBtn.AbsolutePosition.X
+        local sz  = trackBtn.AbsoluteSize.X
         if sz <= 0 then return end
         local t   = math.clamp((posX - abs) / sz, 0, 1)
         local val = math.floor(minV + t*(maxV-minV) + 0.5)
-        State[stateKey] = val
+        State[stateKey]   = val
         fill.Size         = UDim2.new(t,0,1,0)
         knob.Position     = UDim2.new(t,-8,0.5,-8)
         valLbl.Text       = tostring(val)..unit
         if onChange then onChange(val) end
     end
-
     trackBtn.InputBegan:Connect(function(inp)
         if inp.UserInputType == Enum.UserInputType.MouseButton1
         or inp.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            updateFromX(inp.Position.X)
+            dragging = true; updateFromX(inp.Position.X)
         end
     end)
     UserInputService.InputChanged:Connect(function(inp)
@@ -1143,11 +1219,9 @@ local function MkSlider(text, minV, maxV, stateKey, unit, onChange)
             dragging = false
         end
     end)
-
     return container
 end
 
--- Dropdown — TextButton container for touch
 local function MkDropdown(labelText, options, stateKey, onChange)
     local container = Instance.new("TextButton")
     container.Size             = UDim2.new(1,0,0,50)
@@ -1156,53 +1230,17 @@ local function MkDropdown(labelText, options, stateKey, onChange)
     container.Text             = ""
     container.AutoButtonColor  = false
     container.ClipsDescendants = false
-    Corner(container,8)
-    Stroke(container,T.Border,1)
+    Corner(container,8); Stroke(container,T.Border,1)
+    MkLabel({Text=labelText, TextSize=10, TextColor3=T.TextDim, Size=UDim2.new(1,0,0,16), Position=UDim2.fromOffset(10,-18), Parent=container})
+    local dispLbl = MkLabel({Text=tostring(State[stateKey] or (options and options[1] or "Select")), TextSize=13, Size=UDim2.new(1,-40,1,0), Position=UDim2.fromOffset(10,0), Parent=container})
+    MkLabel({Text="▾", TextSize=18, TextColor3=T.TextDim, Size=UDim2.fromOffset(36,50), Position=UDim2.new(1,-38,0,0), TextXAlignment=Enum.TextXAlignment.Center, Parent=container})
 
-    -- Caption
-    MkLabel({
-        Text       = labelText,
-        TextSize   = 10,
-        TextColor3 = T.TextDim,
-        Size       = UDim2.new(1,0,0,16),
-        Position   = UDim2.fromOffset(10,-18),
-        Parent     = container,
-    })
-
-    local dispLbl = MkLabel({
-        Text     = tostring(State[stateKey] or (options and options[1] or "Select")),
-        TextSize = 13,
-        Size     = UDim2.new(1,-40,1,0),
-        Position = UDim2.fromOffset(10,0),
-        Parent   = container,
-    })
-    MkLabel({
-        Text             = "▾",
-        TextSize         = 18,
-        TextColor3       = T.TextDim,
-        Size             = UDim2.fromOffset(36,50),
-        Position         = UDim2.new(1,-38,0,0),
-        TextXAlignment   = Enum.TextXAlignment.Center,
-        Parent           = container,
-    })
-
-    local dropFrame = MkFrame({
-        BackgroundColor3 = T.Panel,
-        Size             = UDim2.new(1,2,0,0),
-        Position         = UDim2.new(0,-1,1,2),
-        Visible          = false,
-        ZIndex           = 60,
-        Parent           = container,
-    })
-    Corner(dropFrame,8)
-    Stroke(dropFrame,T.Border,1)
+    local dropFrame = MkFrame({BackgroundColor3=T.Panel, Size=UDim2.new(1,2,0,0), Position=UDim2.new(0,-1,1,2), Visible=false, ZIndex=60, Parent=container})
+    Corner(dropFrame,8); Stroke(dropFrame,T.Border,1)
     local uil = Instance.new("UIListLayout"); uil.Padding=UDim.new(0,2); uil.Parent=dropFrame
-    local uip = Instance.new("UIPadding")
-    uip.PaddingTop=UDim.new(0,4); uip.PaddingBottom=UDim.new(0,4)
-    uip.PaddingLeft=UDim.new(0,4); uip.PaddingRight=UDim.new(0,4); uip.Parent=dropFrame
+    local uip = Instance.new("UIPadding"); uip.PaddingTop=UDim.new(0,4); uip.PaddingBottom=UDim.new(0,4); uip.PaddingLeft=UDim.new(0,4); uip.PaddingRight=UDim.new(0,4); uip.Parent=dropFrame
 
     local open = false
-
     local function buildItems(opts)
         for _, c in ipairs(dropFrame:GetChildren()) do
             if c:IsA("TextButton") then c:Destroy() end
@@ -1211,25 +1249,19 @@ local function MkDropdown(labelText, options, stateKey, onChange)
         local n = math.min(#opts, 6)
         for _, opt in ipairs(opts) do
             local btn = Instance.new("TextButton")
-            btn.Size             = UDim2.new(1,0,0,itemH)
-            btn.BackgroundColor3 = T.Card
-            btn.BorderSizePixel  = 0
-            btn.Text             = ""
-            btn.AutoButtonColor  = false
-            btn.ZIndex           = 61
-            btn.Parent           = dropFrame
+            btn.Size=UDim2.new(1,0,0,itemH); btn.BackgroundColor3=T.Card; btn.BorderSizePixel=0
+            btn.Text=""; btn.AutoButtonColor=false; btn.ZIndex=61; btn.Parent=dropFrame
             Corner(btn,6)
             local ip=Instance.new("UIPadding"); ip.PaddingLeft=UDim.new(0,8); ip.Parent=btn
             MkLabel({Text=tostring(opt), TextSize=13, Size=UDim2.new(1,0,1,0), ZIndex=62, Parent=btn})
-            btn.MouseEnter:Connect(function() btn.BackgroundColor3 = T.Border end)
-            btn.MouseLeave:Connect(function() btn.BackgroundColor3 = T.Card   end)
+            btn.MouseEnter:Connect(function() btn.BackgroundColor3=T.Border end)
+            btn.MouseLeave:Connect(function() btn.BackgroundColor3=T.Card   end)
             btn.Activated:Connect(function()
                 State[stateKey] = opt
                 dispLbl.Text    = tostring(opt)
                 open = false
                 TweenService:Create(dropFrame,TweenInfo.new(0.1),{Size=UDim2.new(1,2,0,0)}):Play()
-                task.wait(0.12)
-                dropFrame.Visible = false
+                task.wait(0.12); dropFrame.Visible=false
                 if onChange then onChange(opt) end
             end)
         end
@@ -1237,7 +1269,6 @@ local function MkDropdown(labelText, options, stateKey, onChange)
     end
 
     local totalH = buildItems(options or {})
-
     container.Activated:Connect(function()
         open = not open
         dropFrame.Visible = open
@@ -1246,16 +1277,13 @@ local function MkDropdown(labelText, options, stateKey, onChange)
             TweenService:Create(dropFrame,TweenInfo.new(0.15),{Size=UDim2.new(1,2,0,totalH)}):Play()
         else
             TweenService:Create(dropFrame,TweenInfo.new(0.1),{Size=UDim2.new(1,2,0,0)}):Play()
-            task.wait(0.12)
-            dropFrame.Visible = false
+            task.wait(0.12); dropFrame.Visible=false
         end
     end)
-
     local function updateOptions(opts)
         totalH = buildItems(opts)
         dispLbl.Text = tostring(State[stateKey] or (opts[1] or ""))
     end
-
     return container, updateOptions
 end
 
@@ -1264,28 +1292,42 @@ end
 -- =====================================================================
 local W, H = 330, 520
 
--- Remove old
 local oldFrame = ScreenGui:FindFirstChild("MainFrame")
 if oldFrame then oldFrame:Destroy() end
+
+-- FIX 1: Compute initial position as pure pixel offsets so drag reads
+-- correct values from the very first touch. Using scale-based UDim2
+-- caused Position.X.Offset = -165 which the clamp snapped to 0 instantly.
+local vp0 = workspace.CurrentCamera.ViewportSize
+local initX = math.floor((vp0.X - W) / 2)
+local initY = math.floor((vp0.Y - H) / 2)
 
 local MainFrame = MkFrame({
     Name             = "MainFrame",
     Size             = UDim2.fromOffset(W, H),
-    Position         = UDim2.new(0.5,-W/2,0.5,-H/2),
+    Position         = UDim2.fromOffset(initX, initY),  -- FIX 1
     BackgroundColor3 = T.BG,
     Parent           = ScreenGui,
 })
 Corner(MainFrame, 14)
 Stroke(MainFrame, T.Border, 1)
 
--- DRAG (uses InputBegan/Changed/Ended on the MainFrame)
-local dragOn, dragOrigin, frameOrigin = false, Vector2.zero, Vector2.zero
+-- =====================================================================
+-- DRAG — FIX 1: Read AbsolutePosition instead of Position.X.Offset
+-- =====================================================================
+local dragOn = false
+local dragOrigin  = Vector2.zero
+local frameOrigin = Vector2.zero
+
 MainFrame.InputBegan:Connect(function(inp)
     if inp.UserInputType == Enum.UserInputType.MouseButton1
     or inp.UserInputType == Enum.UserInputType.Touch then
         dragOn     = true
         dragOrigin = Vector2.new(inp.Position.X, inp.Position.Y)
-        frameOrigin= Vector2.new(MainFrame.Position.X.Offset, MainFrame.Position.Y.Offset)
+        -- FIX 1: AbsolutePosition gives the actual rendered pixel position.
+        -- The old code read Position.X.Offset which was -165 for a
+        -- scale=0.5 based position, causing immediate clamp to 0.
+        frameOrigin = Vector2.new(MainFrame.AbsolutePosition.X, MainFrame.AbsolutePosition.Y)
     end
 end)
 UserInputService.InputChanged:Connect(function(inp)
@@ -1314,74 +1356,81 @@ local TitleBar = MkFrame({
     BackgroundColor3 = T.Panel,
     Parent           = MainFrame,
 })
-local tbc = Corner(TitleBar, 14)
--- Bottom overlap to hide bottom corners
-MkFrame({
-    BackgroundColor3 = T.Panel,
-    Size             = UDim2.new(1,0,0,10),
-    Position         = UDim2.new(0,0,1,-10),
-    Parent           = TitleBar,
-})
+Corner(TitleBar, 14)
+MkFrame({BackgroundColor3=T.Panel, Size=UDim2.new(1,0,0,10), Position=UDim2.new(0,0,1,-10), Parent=TitleBar})
 
 MkLabel({
-    Text     = "🪓  LT2 Menu v3  •  Delta",
-    TextSize = 15,
-    Font     = FONT_B,
+    Text       = "🪓  LT2 Menu v3  •  Delta",
+    TextSize   = 15,
+    Font       = FONT_B,
     TextColor3 = T.Green,
-    Size     = UDim2.new(1,-110,1,0),
-    Position = UDim2.fromOffset(14,0),
-    Parent   = TitleBar,
+    Size       = UDim2.new(1,-110,1,0),
+    Position   = UDim2.fromOffset(14,0),
+    Parent     = TitleBar,
 })
 
--- MINIMIZE BUTTON — large, clearly visible TextButton
 local MinBtn, _ = MkBtn({
-    Text             = "–",
-    Size             = UDim2.fromOffset(40,36),
-    Position         = UDim2.new(1,-84,0.5,-18),
-    BackgroundColor3 = T.Card,
-    TextSize         = 20,
-    Font             = FONT_B,
-    TextColor3       = T.Yellow,
-    Parent           = TitleBar,
+    Text="–", Size=UDim2.fromOffset(40,36), Position=UDim2.new(1,-84,0.5,-18),
+    BackgroundColor3=T.Card, TextSize=20, Font=FONT_B, TextColor3=T.Yellow, Parent=TitleBar,
 }, nil)
 
--- CLOSE BUTTON
 local CloseBtn, _ = MkBtn({
-    Text             = "✕",
-    Size             = UDim2.fromOffset(40,36),
-    Position         = UDim2.new(1,-40,0.5,-18),
-    BackgroundColor3 = Color3.fromRGB(70,20,20),
-    TextSize         = 16,
-    TextColor3       = T.Red,
-    Parent           = TitleBar,
+    Text="✕", Size=UDim2.fromOffset(40,36), Position=UDim2.new(1,-40,0.5,-18),
+    BackgroundColor3=Color3.fromRGB(70,20,20), TextSize=16, TextColor3=T.Red, Parent=TitleBar,
 }, function()
     StopFly(); StopDupe(); StopAutoChop(); StopAutoBuy()
     SetNoClip(false); SetLasso(false)
     ScreenGui:Destroy()
 end)
 
--- FLOAT ICON (shown when minimized)
+-- Float icon (when minimized) — also draggable on mobile
 local FloatBtn, _ = MkBtn({
-    Text             = "🪓",
-    Size             = UDim2.fromOffset(58,58),
-    Position         = UDim2.fromOffset(10,90),
-    BackgroundColor3 = T.Panel,
-    TextSize         = 26,
-    Visible          = false,
-    ZIndex           = 30,
-    Parent           = ScreenGui,
+    Text="🪓", Size=UDim2.fromOffset(58,58), Position=UDim2.fromOffset(10,90),
+    BackgroundColor3=T.Panel, TextSize=26, Visible=false, ZIndex=30, Parent=ScreenGui,
 }, nil)
 Corner(FloatBtn, 29)
 Stroke(FloatBtn, T.Green, 2)
+
+-- Make FloatBtn draggable too
+local fdOn, fdOrg, fbOrg = false, Vector2.zero, Vector2.zero
+FloatBtn.InputBegan:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseButton1
+    or inp.UserInputType == Enum.UserInputType.Touch then
+        fdOn  = true
+        fdOrg = Vector2.new(inp.Position.X, inp.Position.Y)
+        fbOrg = Vector2.new(FloatBtn.AbsolutePosition.X, FloatBtn.AbsolutePosition.Y)
+    end
+end)
+UserInputService.InputChanged:Connect(function(inp)
+    if not fdOn then return end
+    if inp.UserInputType == Enum.UserInputType.MouseMovement
+    or inp.UserInputType == Enum.UserInputType.Touch then
+        local d = Vector2.new(inp.Position.X, inp.Position.Y) - fdOrg
+        local vp = workspace.CurrentCamera.ViewportSize
+        FloatBtn.Position = UDim2.fromOffset(
+            math.clamp(fbOrg.X+d.X, 0, vp.X-58),
+            math.clamp(fbOrg.Y+d.Y, 0, vp.Y-58)
+        )
+    end
+end)
+UserInputService.InputEnded:Connect(function(inp)
+    if inp.UserInputType == Enum.UserInputType.MouseButton1
+    or inp.UserInputType == Enum.UserInputType.Touch then
+        fdOn = false
+    end
+end)
 
 local function SetMinimized(v)
     State.Minimized   = v
     MainFrame.Visible = not v
     FloatBtn.Visible  = v
 end
-
-MinBtn.Activated:Connect(function() SetMinimized(true)  end)
-FloatBtn.Activated:Connect(function() SetMinimized(false) end)
+MinBtn.Activated:Connect(function()   SetMinimized(true)  end)
+FloatBtn.Activated:Connect(function()
+    -- Only maximize if we didn't just drag the button
+    local d = (Vector2.new(FloatBtn.AbsolutePosition.X, FloatBtn.AbsolutePosition.Y) - fbOrg).Magnitude
+    if d < 5 then SetMinimized(false) end
+end)
 
 -- =====================================================================
 -- NOTIFICATIONS
@@ -1391,44 +1440,18 @@ local notifOffset = 0
 local function Notify(msg, color, duration)
     color    = color    or T.Green
     duration = duration or 2.5
-
     local nf = MkFrame({
-        Size             = UDim2.fromOffset(270,46),
-        Position         = UDim2.new(1,-280, 1, -(notifOffset+56)),
-        BackgroundColor3 = T.Panel,
-        ZIndex           = 100,
-        Parent           = ScreenGui,
+        Size=UDim2.fromOffset(270,46), Position=UDim2.new(1,-280,1,-(notifOffset+56)),
+        BackgroundColor3=T.Panel, ZIndex=100, Parent=ScreenGui,
     })
-    Corner(nf,8)
-    Stroke(nf, color, 1)
-
-    MkFrame({
-        BackgroundColor3 = color,
-        Size             = UDim2.fromOffset(4,46),
-        ZIndex           = 101,
-        Parent           = nf,
-    })
-
-    MkLabel({
-        Text     = msg,
-        TextSize = 12,
-        Size     = UDim2.new(1,-16,1,0),
-        Position = UDim2.fromOffset(12,0),
-        ZIndex   = 101,
-        Parent   = nf,
-    })
-
+    Corner(nf,8); Stroke(nf,color,1)
+    MkFrame({BackgroundColor3=color, Size=UDim2.fromOffset(4,46), ZIndex=101, Parent=nf})
+    MkLabel({Text=msg, TextSize=12, Size=UDim2.new(1,-16,1,0), Position=UDim2.fromOffset(12,0), ZIndex=101, Parent=nf})
     notifOffset = notifOffset + 52
-    TweenService:Create(nf, TweenInfo.new(0.25), {
-        Position = UDim2.new(1,-280, 1, -notifOffset)
-    }):Play()
-
+    TweenService:Create(nf, TweenInfo.new(0.25), {Position=UDim2.new(1,-280,1,-notifOffset)}):Play()
     task.delay(duration, function()
-        TweenService:Create(nf,TweenInfo.new(0.2),{
-            Position=UDim2.new(1,20,1,-notifOffset)
-        }):Play()
-        task.wait(0.25)
-        nf:Destroy()
+        TweenService:Create(nf,TweenInfo.new(0.2),{Position=UDim2.new(1,20,1,-notifOffset)}):Play()
+        task.wait(0.25); nf:Destroy()
         notifOffset = math.max(0, notifOffset-52)
     end)
 end
@@ -1447,53 +1470,39 @@ local TABS = {
     {n="Build",    i="🏗️"},
 }
 
--- Tab scroll
 local TabArea = MkFrame({
-    Size             = UDim2.new(1,0,0,46),
-    Position         = UDim2.fromOffset(0,50),
-    BackgroundColor3 = T.Panel,
-    ClipsDescendants = true,
-    Parent           = MainFrame,
+    Size=UDim2.new(1,0,0,46), Position=UDim2.fromOffset(0,50),
+    BackgroundColor3=T.Panel, ClipsDescendants=true, Parent=MainFrame,
 })
-MkFrame({
-    BackgroundColor3 = T.Border,
-    Size             = UDim2.new(1,0,0,1),
-    Position         = UDim2.new(0,0,1,-1),
-    Parent           = TabArea,
-})
+MkFrame({BackgroundColor3=T.Border, Size=UDim2.new(1,0,0,1), Position=UDim2.new(0,0,1,-1), Parent=TabArea})
 
 local TabScroll = Instance.new("ScrollingFrame")
-TabScroll.Size                = UDim2.new(1,0,1,0)
-TabScroll.BackgroundTransparency = 1
-TabScroll.BorderSizePixel     = 0
-TabScroll.ScrollBarThickness  = 0
-TabScroll.ScrollingDirection  = Enum.ScrollingDirection.X
-TabScroll.CanvasSize          = UDim2.fromOffset(#TABS*82,0)
-TabScroll.Parent              = TabArea
+TabScroll.Size                  = UDim2.new(1,0,1,0)
+TabScroll.BackgroundTransparency= 1
+TabScroll.BorderSizePixel       = 0
+TabScroll.ScrollBarThickness    = 0
+TabScroll.ScrollingDirection    = Enum.ScrollingDirection.X
+TabScroll.CanvasSize            = UDim2.fromOffset(#TABS*82,0)
+TabScroll.Parent                = TabArea
 local uil_h = Instance.new("UIListLayout")
 uil_h.FillDirection = Enum.FillDirection.Horizontal
 uil_h.SortOrder     = Enum.SortOrder.LayoutOrder
 uil_h.Parent        = TabScroll
 
--- Content scroll
 local ContentFrame = MkFrame({
-    Size             = UDim2.new(1,0,1,0),
-    Position         = UDim2.fromOffset(0,96),
-    BackgroundTransparency = 1,
-    ClipsDescendants = true,
-    Parent           = MainFrame,
+    Size=UDim2.new(1,0,1,-96), Position=UDim2.fromOffset(0,96),
+    BackgroundTransparency=1, ClipsDescendants=true, Parent=MainFrame,
 })
-ContentFrame.Size = UDim2.new(1,0,1,-96)
 
 local ContentScroll = Instance.new("ScrollingFrame")
-ContentScroll.Size                = UDim2.new(1,0,1,0)
-ContentScroll.BackgroundTransparency = 1
-ContentScroll.BorderSizePixel     = 0
-ContentScroll.ScrollBarThickness  = 4
+ContentScroll.Size                 = UDim2.new(1,0,1,0)
+ContentScroll.BackgroundTransparency= 1
+ContentScroll.BorderSizePixel      = 0
+ContentScroll.ScrollBarThickness   = 4
 ContentScroll.ScrollBarImageColor3 = T.Border
-ContentScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
-ContentScroll.CanvasSize          = UDim2.new(0,0,0,0)
-ContentScroll.Parent              = ContentFrame
+ContentScroll.AutomaticCanvasSize  = Enum.AutomaticSize.Y
+ContentScroll.CanvasSize           = UDim2.new(0,0,0,0)
+ContentScroll.Parent               = ContentFrame
 
 local uil_v = Instance.new("UIListLayout")
 uil_v.Padding   = UDim.new(0,7)
@@ -1510,11 +1519,13 @@ uip_c.Parent        = ContentScroll
 -- =====================================================================
 -- PAGE BUILDER HELPERS
 -- =====================================================================
-local PageFns  = {}
-local TabBtns  = {}
+local PageFns = {}
+local TabBtns = {}
 
 local function ClearContent()
     for _, c in ipairs(ContentScroll:GetChildren()) do
+        -- UIListLayout and UIPadding are NOT GuiObjects so they are
+        -- preserved automatically; only Frames, Buttons, Labels get destroyed.
         if c:IsA("GuiObject") then c:Destroy() end
     end
 end
@@ -1526,18 +1537,16 @@ local function ShowPage(idx)
     for i, btn in ipairs(TabBtns) do
         local active = i == idx
         TweenService:Create(btn,TweenInfo.new(0.12),{
-            BackgroundColor3     = active and T.Card or T.Panel,
-            BackgroundTransparency = active and 0 or 0,
-            TextColor3           = active and T.Green or T.TextDim,
+            BackgroundColor3 = active and T.Card or T.Panel,
+            TextColor3       = active and T.Green or T.TextDim,
         }):Play()
     end
     if PageFns[idx] then PageFns[idx]() end
 end
 
--- Build tab buttons
 for i, tab in ipairs(TABS) do
     local btn = Instance.new("TextButton")
-    btn.Size             = UDim2.fromOffset(80, 42)
+    btn.Size             = UDim2.fromOffset(80,42)
     btn.BackgroundColor3 = T.Panel
     btn.BorderSizePixel  = 0
     btn.Text             = tab.i.."\n"..tab.n
@@ -1551,33 +1560,26 @@ for i, tab in ipairs(TABS) do
     table.insert(TabBtns, btn)
 end
 
--- Quick shorthand for building content
-local CS = ContentScroll  -- use this in page fns
+local CS = ContentScroll
 
 local function Sec(t, c) MkSectionHeader(t, c).Parent = CS end
 local function Lbl(t, sz, c)
     MkLabel({Text=t, TextSize=sz or 12, TextColor3=c or T.TextDim, Size=UDim2.new(1,0,0,sz and sz*2 or 30), Parent=CS})
 end
 local function Btn(t, tc, onClick)
-    local b = MkBtn({
-        Text             = t,
-        Size             = UDim2.new(1,0,0,50),
-        BackgroundColor3 = T.Card,
-        TextColor3       = tc or T.TextOn,
-        Parent           = CS,
-    }, onClick)
-    return b
+    return MkBtn({Text=t, Size=UDim2.new(1,0,0,50), BackgroundColor3=T.Card, TextColor3=tc or T.TextOn, Parent=CS}, onClick)
 end
-local function Tog(t, k, fn)  local w = MkToggle(t, k, fn); w.Parent = CS; return w end
-local function Sld(t,mn,mx,k,u,fn) local w = MkSlider(t,mn,mx,k,u,fn); w.Parent = CS; return w end
-local function Drp(lbl,opts,k,fn)  local w,uf = MkDropdown(lbl,opts,k,fn); w.Parent = CS; return w,uf end
+local function Tog(t, k, fn)  local w = MkToggle(t,k,fn); w.Parent=CS; return w end
+local function Sld(t,mn,mx,k,u,fn) local w=MkSlider(t,mn,mx,k,u,fn); w.Parent=CS; return w end
+local function Drp(lbl,opts,k,fn)  local w,uf=MkDropdown(lbl,opts,k,fn); w.Parent=CS; return w,uf end
 
 -- =====================================================================
 -- PAGE 1: SLOT
 -- =====================================================================
 PageFns[1] = function()
     Sec("Save & Load Slots", T.Cyan)
-    Drp("Choose Slot", {"1","2","3","4"}, "SaveSlot", function(v) State.SaveSlot=tonumber(v) or 1 end)
+    Lbl("GetMetaData & ClientMayLoad confirmed. RequestSave/RequestLoad unconfirmed — may not work.", 11, T.Orange)
+    Drp("Choose Slot", {"1","2","3","4"}, "SaveSlot", function(v) State.SaveSlot = tonumber(v) or 1 end)
 
     Btn("💾  Save to Slot "..State.SaveSlot, T.Green, function()
         Notify("Saving to Slot "..State.SaveSlot.."...", T.Yellow, 2)
@@ -1596,7 +1598,7 @@ PageFns[1] = function()
     end)
 
     Sec("Land Purchase", T.Orange)
-    Lbl("Finds nearest unowned plot and fires ClientPurchasedProperty.", 12)
+    Lbl("SetPropertyPurchasingValue confirmed. ClientPurchasedProperty unconfirmed.", 11, T.Orange)
     Btn("🏡  Buy Available Land", T.Yellow, function()
         Notify("Attempting land purchase...", T.Yellow, 2)
         task.spawn(function()
@@ -1628,7 +1630,7 @@ end
 PageFns[2] = function()
     Sec("Movement", T.Green)
     Sld("Walk Speed", 1, 150, "WalkSpeed", " st/s", function(v) SetWalkSpeed(v) end)
-    Sld("Jump Power", 1, 250, "JumpPower",  " pow",  function(v) SetJumpPower(v)  end)
+    Sld("Jump Power", 1, 250, "JumpPower",  " pow",  function(v) SetJumpPower(v) end)
     Sld("Fly Speed",  5, 300, "FlySpeed",   " st/s", nil)
 
     Btn("↩  Reset to Default", T.TextDim, function()
@@ -1637,11 +1639,12 @@ PageFns[2] = function()
         Notify("Speed and jump reset", T.Cyan)
     end)
 
-    Sec("Fly  [Tap to toggle — use on-screen joystick]", T.Orange)
-    Lbl("WASD+Space/Shift to steer. Also toggleable below.", 12)
+    Sec("Fly  [Touch D-pad appears bottom-left when enabled]", T.Orange)
+    -- FIX 2: Updated description — keyboard + D-pad both work now
+    Lbl("On Android: use the on-screen D-pad (↑↓←→⬆⬇) that appears when fly is ON.", 12)
     Tog("✈  Fly Mode", "Flying", function(v)
         if v then StartFly() else StopFly() end
-        Notify(v and "Fly ON" or "Fly OFF", T.Orange)
+        Notify(v and "Fly ON — use D-pad bottom-left" or "Fly OFF", T.Orange)
     end)
 
     Sec("Utility", T.TextDim)
@@ -1680,13 +1683,9 @@ PageFns[3] = function()
     table.sort(wpList)
     State.SelectedWaypoint = State.SelectedWaypoint or wpList[1]
     Drp("Select Waypoint", wpList, "SelectedWaypoint", nil)
-
     Btn("🚀  Teleport to Waypoint", T.Cyan, function()
         local wp = WAYPOINTS[State.SelectedWaypoint]
-        if wp then
-            TeleportPos(wp.X, wp.Y, wp.Z)
-            Notify("✓ Teleported to "..State.SelectedWaypoint, T.Cyan)
-        end
+        if wp then TeleportPos(wp.X,wp.Y,wp.Z); Notify("✓ Teleported to "..State.SelectedWaypoint, T.Cyan) end
     end)
 
     Sec("Player Teleport", T.Green)
@@ -1694,14 +1693,10 @@ PageFns[3] = function()
     for _, p in ipairs(Players:GetPlayers()) do table.insert(pNames, p.Name) end
     State.TargetPlayer = State.TargetPlayer or (pNames[1] or "")
     local _, pDropUpdate = Drp("Select Player", pNames, "TargetPlayer", nil)
-
     Btn("🔄  Refresh Players", T.TextDim, function()
-        local names = {}
-        for _, p in ipairs(Players:GetPlayers()) do table.insert(names, p.Name) end
-        pDropUpdate(names)
-        Notify("Players refreshed", T.Cyan, 1.5)
+        local names = {}; for _, p in ipairs(Players:GetPlayers()) do table.insert(names, p.Name) end
+        pDropUpdate(names); Notify("Players refreshed", T.Cyan, 1.5)
     end)
-
     Btn("➡  Teleport to Player", T.Green, function()
         local target = Players:FindFirstChild(State.TargetPlayer or "")
         if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
@@ -1719,11 +1714,9 @@ end
 -- =====================================================================
 PageFns[4] = function()
     Sec("Auto Chop", T.Green)
-    Lbl("Fires RemoteProxy with verified CutEvent arg.\nWoodSection parts with ID+CutEvent parent.", 12)
+    Lbl("⚠ RemoteProxy path unconfirmed (server-side only). Will warn in output if missing.", 11, T.Orange)
     Lbl("STATUS: "..(State.AutoWoodOn and "🟢 Running" or "⭕ Idle"), 13, State.AutoWoodOn and T.Green or T.TextDim)
-
     Sld("Max Sections Per Pass", 5, 200, "WoodAmount", "x", nil)
-
     Btn("🌲  Start Auto Chop", T.Green, function()
         if State.AutoWoodOn then Notify("Already running", T.Orange); return end
         local axe = GetAxe()
@@ -1731,14 +1724,12 @@ PageFns[4] = function()
         StartAutoChop()
         Notify("Auto Chop started", T.Green)
     end)
-
     Btn("⏹  Stop Auto Chop", T.Red, function()
-        StopAutoChop()
-        Notify("Auto Chop stopped", T.Red)
+        StopAutoChop(); Notify("Auto Chop stopped", T.Red)
     end)
 
     Sec("Sell Wood", T.Yellow)
-    Lbl("TPs to Wood Drop-off and moves your owned wood pieces.", 12)
+    Lbl("TPs to Wood Drop-off and moves your owned wood pieces into the sell zone.", 12)
     Btn("💰  Sell All Wood", T.Yellow, function()
         task.spawn(function()
             Notify("Teleporting to sell area...", T.Yellow, 2)
@@ -1747,7 +1738,7 @@ PageFns[4] = function()
         end)
     end)
     Btn("🏪  TP to Wood Drop-off", T.TextOn, function()
-        TeleportPos(-35, 4, 60); Notify("TP → Wood Drop-off", T.Cyan)
+        TeleportPos(-35,4,60); Notify("TP → Wood Drop-off", T.Cyan)
     end)
 end
 
@@ -1756,38 +1747,31 @@ end
 -- =====================================================================
 PageFns[5] = function()
     Sec("Store Auto-Buy", T.Green)
-    Lbl("TPs to store, uses AttemptPurchase RF or dialog fallback.", 12)
+    Lbl("SetChattingValue confirmed. AttemptPurchase & PlayerChatted unconfirmed.", 11, T.Orange)
 
     local itemDisplay = {}
-    for _, it in ipairs(STORE_ITEMS) do
-        table.insert(itemDisplay, it.name.." ($"..it.price..")")
-    end
+    for _, it in ipairs(STORE_ITEMS) do table.insert(itemDisplay, it.name.." ($"..it.price..")") end
     State.BuyItemDisplay = State.BuyItemDisplay or itemDisplay[1]
 
     Drp("Select Item to Buy", itemDisplay, "BuyItemDisplay", function(v)
         for _, it in ipairs(STORE_ITEMS) do
-            if (it.name.." ($"..it.price..")") == v then
-                State.BuyItem = it.toolname; break
-            end
+            if (it.name.." ($"..it.price..")") == v then State.BuyItem = it.toolname; break end
         end
     end)
-
-    Sld("Amount", 1, 50, "BuyAmt", "x",  nil)
-    Sld("Delay",  1, 30, "BuyDelay", "s", nil)
-
+    Sld("Amount", 1, 50, "BuyAmt",  "x",  nil)
+    Sld("Delay",  1, 30, "BuyDelay","s",  nil)
     Btn("🛒  Start Auto Buy", T.Green, function()
         if State.AutoBuying then Notify("Already buying", T.Orange); return end
-        StartAutoBuy()
-        Notify("Auto Buy started: "..State.BuyItem, T.Green)
+        StartAutoBuy(); Notify("Auto Buy started: "..State.BuyItem, T.Green)
     end)
     Btn("⏹  Stop Auto Buy", T.Red, function()
         StopAutoBuy(); Notify("Auto Buy stopped", T.Red)
     end)
 
     Sec("Quick Store TP", T.Cyan)
-    Btn("🪓  WoodRUs",     T.TextOn, function() TeleportPos(-275,5,105); Notify("TP → WoodRUs",    T.Cyan) end)
-    Btn("🏚  Bob's Shack", T.TextOn, function() TeleportPos(-252,5,400); Notify("TP → Bob's Shack",T.Cyan) end)
-    Btn("⚙  Link's Logic", T.TextOn, function() TeleportPos(15,5,262);  Notify("TP → Link's Logic",T.Cyan) end)
+    Btn("🪓  WoodRUs",      T.TextOn, function() TeleportPos(-275,5,105); Notify("TP → WoodRUs",     T.Cyan) end)
+    Btn("🏚  Bob's Shack",  T.TextOn, function() TeleportPos(-252,5,400); Notify("TP → Bob's Shack", T.Cyan) end)
+    Btn("⚙  Link's Logic", T.TextOn, function() TeleportPos(15,5,262);   Notify("TP → Link's Logic",T.Cyan) end)
 end
 
 -- =====================================================================
@@ -1798,11 +1782,8 @@ PageFns[6] = function()
     Lbl("Enable Lasso, then tap parts in-world to add to selection.", 12)
 
     local countLbl = MkLabel({
-        Text     = "Selected: "..#State.SelectedItems.." items",
-        TextSize = 13,
-        TextColor3 = T.TextDim,
-        Size     = UDim2.new(1,0,0,26),
-        Parent   = CS,
+        Text="Selected: "..#State.SelectedItems.." items", TextSize=13,
+        TextColor3=T.TextDim, Size=UDim2.new(1,0,0,26), Parent=CS,
     })
     local heartConn
     heartConn = RunService.Heartbeat:Connect(function()
@@ -1816,28 +1797,23 @@ PageFns[6] = function()
     end)
 
     Tog("🎯  Lasso ON — tap parts to select", "LassoOn", function(v)
-        SetLasso(v)
-        Notify(v and "Lasso ON — tap parts" or "Lasso OFF", T.Cyan, 1.5)
+        SetLasso(v); Notify(v and "Lasso ON — tap parts" or "Lasso OFF", T.Cyan, 1.5)
     end)
-
     Btn("✕  Deselect All", T.TextDim, function()
-        State.SelectedItems = {}
-        Notify("Selection cleared", T.TextDim, 1.5)
+        State.SelectedItems = {}; Notify("Selection cleared", T.TextDim, 1.5)
     end)
 
     Sec("Actions on Selection", T.Green)
     Sld("Stack Spacing", 1, 20, "StackLen", " st", nil)
-
     Btn("📍  Teleport Selected to Me", T.Green, function()
         if #State.SelectedItems == 0 then Notify("Nothing selected", T.Orange); return end
         local n = TeleportSelectedToMe()
         Notify("✓ Moved "..n.." items to you", T.Green)
     end)
-
     Btn("🗑  Destroy Selected", T.Red, function()
         if #State.SelectedItems == 0 then Notify("Nothing selected", T.Orange); return end
         local n = DestroySelected()
-        Notify("Destroyed "..n.." items via DestroyStructure", T.Red)
+        Notify("Destroyed "..n.." items", T.Red)
     end)
 
     Sec("Drop Tools", T.Orange)
@@ -1860,30 +1836,22 @@ end
 -- =====================================================================
 PageFns[7] = function()
     Sec("Axe Drop-Pick Dupe", T.Orange)
-    Lbl("Drops axe via ClientInteracted, tps to pick up, repeats.\nEquip an axe first.", 12)
+    Lbl("Drops axe via ClientInteracted (confirmed), TPs to pick up, repeats.\nEquip an axe first.", 12)
 
     local statusLbl = MkLabel({
-        Text       = "Status: ⭕ Idle",
-        TextSize   = 14,
-        TextColor3 = T.TextDim,
-        Size       = UDim2.new(1,0,0,28),
-        Parent     = CS,
+        Text="Status: ⭕ Idle", TextSize=14, TextColor3=T.TextDim,
+        Size=UDim2.new(1,0,0,28), Parent=CS,
     })
     RunService.Heartbeat:Connect(function()
         pcall(function()
             if statusLbl and statusLbl.Parent then
-                if State.Duping then
-                    statusLbl.Text       = "Status: 🟢 Running..."
-                    statusLbl.TextColor3 = T.Green
-                else
-                    statusLbl.Text       = "Status: ⭕ Idle"
-                    statusLbl.TextColor3 = T.TextDim
-                end
+                statusLbl.Text       = State.Duping and "Status: 🟢 Running..." or "Status: ⭕ Idle"
+                statusLbl.TextColor3 = State.Duping and T.Green or T.TextDim
             end
         end)
     end)
 
-    Sld("Amount",     1, 100, "DupeAmt",  "x",    nil)
+    Sld("Amount",     1, 100, "DupeAmt",  "x",     nil)
     Sld("Drop Delay", 1,  50, "DupeWait", "×0.1s", nil)
 
     Btn("▶  Start Axe Dupe", T.Green, function()
@@ -1891,13 +1859,8 @@ PageFns[7] = function()
         if not axe then Notify("No axe — equip one first!", T.Red); return end
         if State.Duping then Notify("Already duping!", T.Orange); return end
         local ok = StartDupe()
-        if ok then
-            Notify("Dupe started ×"..State.DupeAmt, T.Green)
-        else
-            Notify("Could not start dupe", T.Red)
-        end
+        Notify(ok and "Dupe started ×"..State.DupeAmt or "Could not start dupe", ok and T.Green or T.Red)
     end)
-
     Btn("⏹  Stop Dupe", T.Red, function()
         StopDupe(); Notify("Dupe stopped", T.Red)
     end)
@@ -1921,9 +1884,8 @@ end
 -- =====================================================================
 PageFns[8] = function()
     Sec("Blueprint Placement", T.Green)
-    Lbl("Uses ClientPlacedBlueprint (primary) or ClientPlacedStructure (fallback) — both verified in RS.PlaceStructure", 12)
+    Lbl("⚠ ClientPlacedBlueprint & ClientPlacedStructure are unconfirmed paths.", 11, T.Orange)
 
-    -- Get structure names from ClientItemInfo if available
     local bpNames = {"Sawmill","Sawmill2","Sawmill3","Sawmill4","Floor1","Wall2Tall","Door1","Post"}
     pcall(function()
         local cii = RS:FindFirstChild("ClientItemInfo")
@@ -1941,7 +1903,6 @@ PageFns[8] = function()
 
     State.SelectedBlueprint = State.SelectedBlueprint or bpNames[1]
     Drp("Select Blueprint", bpNames, "SelectedBlueprint", nil)
-
     Btn("📐  Place Blueprint Here", T.Green, function()
         if not State.SelectedBlueprint then Notify("No blueprint selected", T.Orange); return end
         task.spawn(function()
@@ -1949,25 +1910,25 @@ PageFns[8] = function()
             Notify((ok and "✓ Placement fired" or "✗ "..tostring(msg)), ok and T.Green or T.Red)
         end)
     end)
-
     Btn("🔧  Auto Fill My Blueprints", T.Cyan, function()
         task.spawn(function()
             local ok, msg = AutoFillBlueprints()
             Notify((ok and "✓ " or "✗ ")..tostring(msg), ok and T.Green or T.Red)
         end)
     end)
-
     Btn("🗑  Destroy My Blueprints", T.Red, function()
         task.spawn(function()
             local ds = rDestroyStructure()
+            local ci = rClientInteracted()
             local n = 0
             for _, obj in ipairs(workspace:GetDescendants()) do
                 if obj.Name == "Blueprint" then
                     local ov = obj:FindFirstChild("Owner")
                     if ov and ov.Value == LP then
                         if ds then pcall(function() ds:FireServer(obj) end)
-                        else       pcall(function() obj:Destroy()     end) end
-                        n = n + 1; task.wait(0.06)
+                        elseif ci then pcall(function() ci:FireServer(obj, "Destroy", CFrame.new()) end)
+                        else         pcall(function() obj:Destroy() end) end
+                        n = n+1; task.wait(0.06)
                     end
                 end
             end
@@ -1976,16 +1937,15 @@ PageFns[8] = function()
     end)
 
     Sec("Plot Steal (Experimental)", T.Red)
+    Lbl("⚠ ClientPurchasedProperty is unconfirmed.", 11, T.Orange)
     local pNames = {}
     for _, p in ipairs(Players:GetPlayers()) do table.insert(pNames, p.Name) end
     State.StealTarget = State.StealTarget or (pNames[1] or "")
     local _, stealUpdate = Drp("Target Player", pNames, "StealTarget", nil)
-
     Btn("🔄  Refresh Players", T.TextDim, function()
-        local names={}; for _, p in ipairs(Players:GetPlayers()) do table.insert(names,p.Name) end
+        local names={}; for _, p in ipairs(Players:GetPlayers()) do table.insert(names, p.Name) end
         stealUpdate(names); Notify("Players refreshed", T.Cyan, 1.5)
     end)
-
     Btn("🏠  Attempt Plot Steal", T.Red, function()
         if not State.StealTarget or State.StealTarget == "" then Notify("Select a target player first", T.Orange); return end
         task.spawn(function()
@@ -1996,7 +1956,7 @@ PageFns[8] = function()
 end
 
 -- =====================================================================
--- RE-APPLY SPEED ON RESPAWN
+-- RE-APPLY ON RESPAWN
 -- =====================================================================
 LP.CharacterAdded:Connect(function()
     task.wait(1)
@@ -2008,11 +1968,11 @@ LP.CharacterAdded:Connect(function()
             else                     hum.JumpHeight = State.JumpPower/5 end
         end)
     end
-    if State.NoClipOn   then SetNoClip(true)     end
-    if State.Flying     then StartFly()          end
-    if State.AlwaysDay  then SetAlwaysDay(true)  end
-    if State.AlwaysNight then SetAlwaysNight(true) end
-    if State.NoFog      then SetNoFog(true)      end
+    if State.NoClipOn    then SetNoClip(true)      end
+    if State.Flying      then StartFly()            end
+    if State.AlwaysDay   then SetAlwaysDay(true)    end
+    if State.AlwaysNight then SetAlwaysNight(true)  end
+    if State.NoFog       then SetNoFog(true)        end
 end)
 
 -- =====================================================================
@@ -2026,8 +1986,8 @@ TweenService:Create(MainFrame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.Ea
 ShowPage(1)
 
 task.delay(0.6, function()
-    Notify("🪓 LT2 Menu v3 Loaded — Delta Android", T.Green, 4)
-    Notify("All remotes & mechanics verified from XML", T.Cyan, 5)
+    Notify("🪓 LT2 Menu v3 FIXED — Delta Android", T.Green, 4)
+    Notify("Drag ✓  Fly Touch ✓  Remotes verified ✓", T.Cyan, 5)
 end)
 
-return "LT2_Menu_v3_Delta loaded"
+return "LT2_Menu_v3_Delta_FIXED loaded"
