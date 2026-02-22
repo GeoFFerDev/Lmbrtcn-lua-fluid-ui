@@ -45,8 +45,8 @@ local T = {
     SmallCorner  = UDim.new(0, 5),
     SidebarW     = 145,
     RowH         = 36,
-    WinW         = 560,
-    WinH         = 400,
+    WinW         = 480,
+    WinH         = 360,
 }
 
 -- ─────────────────────────────────────────────────────────────────
@@ -157,7 +157,7 @@ MakeDraggable(Icon, Icon)
 -- MAIN WINDOW
 -- ─────────────────────────────────────────────────────────────────
 local Main = New("Frame", {
-    Name="Main", Size=UDim2.new(0,T.WinW,0,T.WinH), Position=UDim2.new(0.5,-T.WinW/2,0.5,-T.WinH/2),
+    Name="Main", Size=UDim2.new(0,T.WinW,0,T.WinH), Position=UDim2.new(0.5,-T.WinW/2,0.1,20),
     BackgroundColor3=T.WindowBG, BorderSizePixel=0, ClipsDescendants=true, ZIndex=5, Parent=ScreenGui,
 })
 Corner(Main); Stroke(Main, Color3.fromRGB(38,52,72), 1)
