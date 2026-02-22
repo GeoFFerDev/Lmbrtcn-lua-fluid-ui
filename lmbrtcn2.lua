@@ -456,20 +456,34 @@ end
 -- ═══════════════════════════════════════════════════════════════════
 
 -- Lazy remote resolvers  (NO blocking WaitForChild at startup)
-local _Interaction, _Transactions, _LoadSaveRequests
+local _Interaction, _Transactions, _LoadSaveRequests, _PropertyPurchasing
 local function GetInteraction()
+    -- ReplicatedStorage > Interaction folder
+    -- Contains: ServerUpdateClientProperty, ActivateAlternate, ClientInteracted, etc.
     if not _Interaction then _Interaction=ReplicatedStorage:FindFirstChild("Interaction") end
     return _Interaction
 end
 local function GetTransactions()
-    -- Transactions is its own separate Folder in ReplicatedStorage (NOT Interaction)
+    -- ReplicatedStorage > Transactions folder
+    -- > ClientToServer: AttemptPurchase(RF), GetFunds(RF), Donate(RF), ProductPurchase(RF), ASet(RF)
+    -- > ServerToClient: FundsChanged(RE)
+    -- > ServerToServer: AddFunds(BE), SetFunds(BF)
     if not _Transactions then _Transactions=ReplicatedStorage:FindFirstChild("Transactions") end
     return _Transactions
 end
 local function GetLoadSave()
-    -- RequestSave, RequestLoad, SelectLoadPlot are in LoadSaveRequests, NOT Transactions
+    -- ReplicatedStorage > LoadSaveRequests folder
+    -- Contains: RequestSave(RF), RequestLoad(RF), GetAutosaveFrequency(RF), GetMetaData(RF), ClientMayLoad(RF)
+    -- NOTE: SelectLoadPlot is NOT here - it lives in PropertyPurchasing
     if not _LoadSaveRequests then _LoadSaveRequests=ReplicatedStorage:FindFirstChild("LoadSaveRequests") end
     return _LoadSaveRequests
+end
+local function GetPropertyPurchasing()
+    -- ReplicatedStorage > PropertyPurchasing folder
+    -- Contains: SelectLoadPlot(RF), ClientEnterPropertyPurchaseMode(RE),
+    --           ClientExpandedProperty(RE), SetPropertyPurchasingValue(RF), ClientPurchasedProperty(RE)
+    if not _PropertyPurchasing then _PropertyPurchasing=ReplicatedStorage:FindFirstChild("PropertyPurchasing") end
+    return _PropertyPurchasing
 end
 
 local function GetChar() return LP.Character end
@@ -574,19 +588,21 @@ local function BaseHelp()
     end
 end
 local function FreeLand()
+    -- Searches Workspace.Properties for an unclaimed plot (Owner.Value == nil)
+    -- Teleports player onto it then calls SelectLoadPlot (in PropertyPurchasing) to register it
     local props=Workspace:FindFirstChild("Properties"); if not props then return end
     for _,plot in ipairs(props:GetChildren()) do
         local ow=plot:FindFirstChild("Owner")
         if ow and not ow.Value then
-            -- Teleport to the plot's OriginSquare or first BasePart
             local origin=plot:FindFirstChild("OriginSquare") or plot:FindFirstChild("Square")
             local hrp=GetHRP()
             if hrp and origin and origin:IsA("BasePart") then
                 hrp.CFrame=CFrame.new(origin.Position+Vector3.new(0,10,0))
             end
-            -- Also invoke SelectLoadPlot which is in LoadSaveRequests
-            local ls=GetLoadSave()
-            if ls then local rf=ls:FindFirstChild("SelectLoadPlot"); if rf then pcall(function() rf:InvokeServer() end) end end
+            task.wait(0.5)
+            -- SelectLoadPlot is in PropertyPurchasing, NOT LoadSaveRequests
+            local pp=GetPropertyPurchasing()
+            if pp then local rf=pp:FindFirstChild("SelectLoadPlot"); if rf and rf:IsA("RemoteFunction") then pcall(function() rf:InvokeServer() end) end end
             return
         end
     end
@@ -636,33 +652,58 @@ local function TeleportWoodToMe()
     end
 end
 local function DupeWood()
-    -- Store_WoodRUs part is at 301.7, 13.8, 57.5 (from XML). NOT 5184,65,535.
+    -- Moves all loaded tree models to the Wood R' Us sell zone (Store_WoodRUs at 301.7,13.8,57.5)
+    -- Trees are unnamed Models with WoodSection parts + CutEvent BindableEvent
+    -- SetPrimaryPartCFrame requires a PrimaryPart set on the model; falls back to WoodSection
     local storePos=CFrame.new(301.7, 15, 57.5)
+    local moved=0
     for _,v in ipairs(Workspace:GetDescendants()) do
-        if v:IsA("Model") and v:FindFirstChild("WoodSection") then
-            pcall(function() v:SetPrimaryPartCFrame(storePos) end)
+        if v:IsA("Model") and v:FindFirstChild("CutEvent") and v:FindFirstChild("WoodSection") then
+            pcall(function()
+                if v.PrimaryPart then
+                    v:SetPrimaryPartCFrame(storePos*CFrame.new(math.random(-3,3),0,math.random(-3,3)))
+                else
+                    -- Fallback: move the WoodSection directly
+                    local ws=v:FindFirstChild("WoodSection")
+                    if ws then ws.CFrame=storePos*CFrame.new(math.random(-3,3),0,math.random(-3,3)) end
+                end
+            end)
+            moved=moved+1
         end
     end
 end
 
 -- AUTO CHOP
+-- Tree structure confirmed from XML:
+--   unnamed Model > TreeClass (StringValue), CutEvent (BindableEvent), WoodSection (Part x N), Leaves (Model)
+-- CutEvent is a BindableEvent → must use :Fire(), NOT :FireServer()
+-- TreeClass.Value matches: "Oak","Birch","Walnut","Koa","Palm","Pine","Fir","Frost","SnowGlow",
+--   "Spooky","SpookyNeon","Volcano","CaveCrawler","LoneCave","Generic","GreenSwampy","GoldSwampy", etc.
 local autoChopConn
 local function StartAutoChop()
     autoChopConn=RunService.Heartbeat:Connect(function()
         if not Flags.AutoChop then return end
         local hrp=GetHRP(); if not hrp then return end
-        local nearest,dist=nil,80
+        local nearest,dist,nearestModel=nil,100,nil
         for _,v in ipairs(Workspace:GetDescendants()) do
-            if v:IsA("BasePart")
-            and (v.Name=="WoodSection" or v.Name=="Wood" or v.Name=="Trunk" or v.Name:lower():find("trunk")) then
-                local d=(hrp.Position-v.Position).Magnitude
-                if d<dist then nearest=v; dist=d end
+            -- Each tree is an unnamed Model containing WoodSection parts and a CutEvent
+            if v:IsA("Model") and v:FindFirstChild("CutEvent") and v:FindFirstChild("WoodSection") then
+                local tc=v:FindFirstChild("TreeClass")
+                local tClass = tc and tc.Value or "Generic"
+                -- Filter by selected wood type (Flags.SelWood = "Any" or specific class name)
+                local typeMatch = (Flags.SelWood=="Any") or (tClass:lower()==Flags.SelWood:lower())
+                if typeMatch then
+                    local ws=v:FindFirstChild("WoodSection")
+                    if ws then
+                        local d=(hrp.Position-ws.Position).Magnitude
+                        if d<dist then nearest=v; dist=d; nearestModel=v end
+                    end
+                end
             end
         end
-        if nearest then
-            -- CutEvent is a BindableEvent on the tree Model, use :Fire() not :FireServer()
-            local model = nearest:FindFirstAncestorOfClass("Model") or nearest.Parent
-            local ce = model and model:FindFirstChild("CutEvent")
+        if nearestModel then
+            local ce=nearestModel:FindFirstChild("CutEvent")
+            -- CutEvent is BindableEvent → :Fire() only, it triggers server-side cut logic
             if ce and ce:IsA("BindableEvent") then pcall(function() ce:Fire() end) end
         end
     end)
@@ -763,12 +804,56 @@ local function StealPlot(playerName)
                 hrp.CFrame=CFrame.new(origin.Position+Vector3.new(0,5,0))
             end
             task.wait(0.5)
-            -- Then invoke SelectLoadPlot to register ownership
-            local ls=GetLoadSave()
-            if ls then local rf=ls:FindFirstChild("SelectLoadPlot"); if rf then pcall(function() rf:InvokeServer() end) end end
+            -- SelectLoadPlot is in PropertyPurchasing folder (NOT LoadSaveRequests)
+            local pp=GetPropertyPurchasing()
+            if pp then local rf=pp:FindFirstChild("SelectLoadPlot"); if rf and rf:IsA("RemoteFunction") then pcall(function() rf:InvokeServer() end) end end
             return
         end
     end
+end
+
+-- MONEY DUPE
+-- How it works:
+--   LT2 uses a region-trigger sell system. When WoodSection parts enter the SELLWOOD
+--   region (255.7, 4, 66.1), the server calculates their value and fires FundsChanged.
+--   We exploit this by: duping axes (which have sell value), moving them into the sell
+--   zone, then dropping them back out. The Donate RemoteFunction
+--   (Transactions > ClientToServer > Donate) lets you send money to another player —
+--   but it also validates server-side so we cannot directly call SetFunds.
+--   The safest working money exploit is: sell real wood quickly (Dupe+Sell loop).
+--   True "add funds from nothing" requires server-side access which a LocalScript cannot do.
+--   The best client-achievable money method is the rapid Dupe+Sell wood loop below.
+local moneyDupeThread
+local Flags_MoneyDupe = false
+local function StartMoneyDupe()
+    Flags_MoneyDupe = true
+    if moneyDupeThread then task.cancel(moneyDupeThread) end
+    moneyDupeThread = task.spawn(function()
+        while Flags_MoneyDupe do
+            -- Step 1: Move all loaded trees to the Wood R'Us sell counter area
+            DupeWood()
+            task.wait(0.8)
+            -- Step 2: Move all wood pieces onto the SELLWOOD trigger zone
+            -- SELLWOOD is at 255.7, 3.9, 66.1 (confirmed from XML)
+            local sellPos = Vector3.new(255.7, 5, 66.1)
+            local n = 0
+            for _,v in ipairs(Workspace:GetDescendants()) do
+                if (v.Name=="WoodSection" or v.Name=="WoodPiece" or v.Name=="Plank") and v:IsA("BasePart") then
+                    pcall(function()
+                        v.Anchored = false
+                        v.AssemblyLinearVelocity = Vector3.zero
+                        v.CFrame = CFrame.new(sellPos + Vector3.new((n%6)*1.5, n*0.05, math.floor(n/6)*1.5))
+                    end)
+                    n = n + 1
+                end
+            end
+            task.wait(2) -- wait for server to register the sell trigger
+        end
+    end)
+end
+local function StopMoneyDupe()
+    Flags_MoneyDupe = false
+    if moneyDupeThread then task.cancel(moneyDupeThread); moneyDupeThread = nil end
 end
 
 -- ═══════════════════════════════════════════════════════════════════
@@ -797,9 +882,10 @@ SlotTab:AddSection("Base & Land")
 SlotTab:AddButton("Teleport → My Base", BaseHelp)
 SlotTab:AddButton("Go to Free Land Plot", FreeLand)
 SlotTab:AddButton("Expand Land (Max)", function()
-    local intr=GetInteraction(); if not intr then return end
-    local evt=intr:FindFirstChild("ClientExpandedProperty")
-    -- ClientExpandedProperty is a RemoteEvent - fire it to request expansion
+    -- ClientExpandedProperty is a RemoteEvent in PropertyPurchasing (not Interaction)
+    -- Must own a plot first. Fires server request to expand property boundary.
+    local pp=GetPropertyPurchasing(); if not pp then return end
+    local evt=pp:FindFirstChild("ClientExpandedProperty")
     if evt and evt:IsA("RemoteEvent") then pcall(function() evt:FireServer() end) end
 end)
 SlotTab:AddSection("Save & Clear")
@@ -849,7 +935,8 @@ end)
 -- WOOD TAB
 local WoodTab = CreateTab("Wood","🪵")
 WoodTab:AddSection("Auto Chop")
-local woodTypes={"Any","Oak","Birch","Walnut","Spooky","Elm","Snowglow","Pine","Lava","Palm","Koa","Fir","Volcano","Sinister","Frost","EndTimes"}
+-- TreeClass values confirmed from XML StringValue entries in tree Models
+local woodTypes={"Any","Generic","Oak","Birch","Walnut","Koa","Palm","Pine","Fir","Frost","SnowGlow","Spooky","SpookyNeon","Volcano","CaveCrawler","LoneCave","GreenSwampy","GoldSwampy","Cherry","BlueSpruce"}
 WoodTab:AddDropdown("Target Wood",{Options=woodTypes,Default="Any"},function(v) Flags.SelWood=v end)
 WoodTab:AddSlider("Get Amount",{Min=1,Max=100,Default=10,Step=1},function(v) Flags.GetTreeAmt=v end)
 WoodTab:AddToggle("Auto Chop",{Default=false},function(v) Flags.AutoChop=v; if v then StartAutoChop() else StopAutoChop() end end)
@@ -859,8 +946,9 @@ WoodTab:AddButton("Move All Wood → Dropoff", SellWood)
 WoodTab:AddButton("Teleport All Wood to Me", TeleportWoodToMe)
 WoodTab:AddButton("Dupe Wood → WoodRUs", DupeWood)
 WoodTab:AddButton("Dupe + Instant Sell",function()
-    DupeWood(); task.wait(0.5); SellWood()
-    local r=ReplicatedStorage:FindFirstChild("SellWood",true); if r then pcall(function() r:FireServer() end) end
+    -- Moves trees to sell zone, then moves wood pieces onto SELLWOOD trigger part
+    -- The SELLWOOD Part at (255.7,4,66.1) is a region trigger — wood touching it gets sold by server
+    DupeWood(); task.wait(0.8); SellWood()
 end)
 WoodTab:AddSection("Info")
 local treeLbl=WoodTab:AddLabel("Press Count Trees to scan")
@@ -888,8 +976,9 @@ BuyTab:AddToggle("Auto Buy Loop",{Default=false},function(v)
 end)
 BuyTab:AddSection("Basic Sawmill")
 BuyTab:AddButton("Buy Basic Sawmill",function()
-    local r=ReplicatedStorage:FindFirstChild("Purchase",true)
-    if r then pcall(function() r:FireServer("BasicSawmill") end) end
+    -- Teleport to Wood R'Us store counter and invoke AttemptPurchase with "BasicSawmill"
+    -- (same system as axes — AttemptPurchase is a RemoteFunction in Transactions > ClientToServer)
+    BuyAxe("BasicSawmill")
 end)
 
 -- DUPE TAB
@@ -898,8 +987,8 @@ DupeTab:AddSection("Wood Dupe")
 DupeTab:AddLabel("Moves loaded tree models to the sawmill area")
 DupeTab:AddButton("Dupe Wood", DupeWood)
 DupeTab:AddButton("Dupe + Instant Sell",function()
-    DupeWood(); task.wait(0.5); SellWood()
-    local r=ReplicatedStorage:FindFirstChild("SellWood",true); if r then pcall(function() r:FireServer() end) end
+    -- Moves trees to sell zone then stacks wood on SELLWOOD trigger (server sells on contact)
+    DupeWood(); task.wait(0.8); SellWood()
 end)
 DupeTab:AddSection("Axe Dupe")
 local dupeWaitSlider=DupeTab:AddSlider("Wait (×0.1s)",{Min=1,Max=30,Default=5,Step=1})
@@ -913,19 +1002,47 @@ DupeTab:AddButton("Clone Held Tool",function()
     pcall(function() t:Clone().Parent=LP.Backpack end)
 end)
 
+-- MONEY TAB
+local MoneyTab = CreateTab("Money","💵")
+MoneyTab:AddSection("How It Works")
+MoneyTab:AddLabel("1. Load trees near your base first")
+MoneyTab:AddLabel("2. Toggle Auto Money Dupe ON")
+MoneyTab:AddLabel("3. Trees dupe to sell zone → wood triggers sell region")
+MoneyTab:AddLabel("4. Server pays you each sell cycle (~2-3s)")
+MoneyTab:AddLabel("5. More trees loaded = more $ per cycle")
+MoneyTab:AddSection("Auto Money Dupe")
+MoneyTab:AddToggle("Auto Money Dupe",{Default=false},function(v)
+    if v then StartMoneyDupe() else StopMoneyDupe() end
+end)
+MoneyTab:AddSection("Manual Steps")
+MoneyTab:AddButton("Step 1: Dupe Trees to Sell Zone", DupeWood)
+MoneyTab:AddButton("Step 2: Stack Wood on SELLWOOD", SellWood)
+MoneyTab:AddSection("Balance")
+local moneyLbl=MoneyTab:AddLabel("Balance: press Refresh")
+MoneyTab:AddButton("Refresh Balance",function() moneyLbl:Set("Balance: $"..GetFunds()) end)
+
 -- SETTINGS TAB
 local SettingsTab = CreateTab("Settings","⚙")
 SettingsTab:AddSection("Controls")
-SettingsTab:AddLabel("PC:     Right Ctrl  =  toggle window")
-SettingsTab:AddLabel("─ button  =  minimize to icon")
-SettingsTab:AddLabel("Mobile: Tap 'LT' icon to restore")
-SettingsTab:AddLabel("Drag title bar or icon freely")
+SettingsTab:AddLabel("PC: Right Ctrl = toggle  |  ─ = minimize")
+SettingsTab:AddLabel("Mobile: Tap LT icon to restore window")
+SettingsTab:AddLabel("Drag the title bar or LT icon to move")
+SettingsTab:AddSection("Feature Guide")
+SettingsTab:AddLabel("FLY: Toggle on → use WASD to fly, Space=up, LShift=down")
+SettingsTab:AddLabel("NOCLIP: Walk through all objects. Toggle off to restore.")
+SettingsTab:AddLabel("AUTO CHOP: Stand near trees. Picks nearest matching type.")
+SettingsTab:AddLabel("AUTO SELL: Runs Dupe+Sell loop every 3s automatically.")
+SettingsTab:AddLabel("DUPE WOOD: Moves loaded trees to sell zone. Need trees near base.")
+SettingsTab:AddLabel("AXE DUPE: Equip/unequip loop. Dupes held axe. Then drop+regrab.")
+SettingsTab:AddLabel("BUY AXE: Auto-TPs to store counter and fires AttemptPurchase.")
+SettingsTab:AddLabel("STEAL PLOT: TPs onto target plot and calls SelectLoadPlot remote.")
+SettingsTab:AddLabel("MONEY DUPE: Dupe trees to SELLWOOD trigger zone. Server pays on contact.")
+SettingsTab:AddLabel("FREE LAND: Finds unclaimed plot, TPs you there, claims via SelectLoadPlot.")
 SettingsTab:AddSection("About")
-SettingsTab:AddLabel("LT2 Exploit Hub  v2.0")
-SettingsTab:AddLabel("Game ID: 13822889")
-SettingsTab:AddLabel("Remotes resolved lazily at runtime")
+SettingsTab:AddLabel("LT2 Exploit Hub  v3.0  |  Game: 13822889")
+SettingsTab:AddLabel("All remotes verified against game XML file")
 SettingsTab:AddSection("Debug / Danger")
-SettingsTab:AddButton("Reset Remote Cache",function() _Interaction=nil; _Transactions=nil; _LoadSaveRequests=nil end)
+SettingsTab:AddButton("Reset Remote Cache",function() _Interaction=nil; _Transactions=nil; _LoadSaveRequests=nil; _PropertyPurchasing=nil end)
 SettingsTab:AddButton("Rejoin Server",function() game:GetService("TeleportService"):Teleport(game.PlaceId,LP) end)
 SettingsTab:AddButton("Destroy GUI",function() ScreenGui:Destroy() end)
 
