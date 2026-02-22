@@ -320,20 +320,100 @@ local function CreateTab(name, icon)
         New("TextLabel",{Text=text,Size=UDim2.new(0.5,-8,1,0),Position=UDim2.new(0,11,0,0),BackgroundTransparency=1,Font=Enum.Font.Gotham,TextSize=12,TextColor3=T.TextPri,TextXAlignment=Enum.TextXAlignment.Left,Parent=header})
         local valLbl=New("TextLabel",{Text=current,Size=UDim2.new(0.5,-28,1,0),Position=UDim2.new(0.5,0,0,0),BackgroundTransparency=1,Font=Enum.Font.Gotham,TextSize=11,TextColor3=T.Accent,TextXAlignment=Enum.TextXAlignment.Right,Parent=header})
         local arrow=New("TextLabel",{Text="▾",Size=UDim2.new(0,18,1,0),Position=UDim2.new(1,-20,0,0),BackgroundTransparency=1,Font=Enum.Font.GothamBold,TextSize=12,TextColor3=T.TextSec,Parent=header})
-        local dd=New("Frame",{Size=UDim2.new(1,0,0,0),Position=UDim2.new(0,0,0,T.RowH+2),BackgroundColor3=T.ElementBG,BorderSizePixel=0,ClipsDescendants=true,Visible=false,ZIndex=10,Parent=wrapper}); Corner(dd); Stroke(dd,T.Accent,1)
-        local itemFrame=New("Frame",{Size=UDim2.new(1,0,0,0),AutomaticSize=Enum.AutomaticSize.Y,BackgroundTransparency=1,Parent=dd}); Pad(itemFrame,3,3,4,4); List(itemFrame,nil,2)
+
+        -- Dropdown panel is parented to ScreenGui so it floats above ALL frames and is never clipped
+        local ddW = 200  -- will be updated when opened
+        local ddH = math.min(#options*30+8, 148)
+        local dd=New("Frame",{
+            Size=UDim2.new(0,ddW,0,0),
+            Position=UDim2.new(0,0,0,0), -- repositioned on open
+            BackgroundColor3=T.ElementBG, BorderSizePixel=0,
+            ClipsDescendants=false, Visible=false, ZIndex=50,
+            Parent=ScreenGui,
+        }); Corner(dd); Stroke(dd,T.Accent,1)
+
+        -- Scrollable container inside the dropdown panel
+        local ddScroll=New("ScrollingFrame",{
+            Size=UDim2.new(1,0,1,0),
+            BackgroundTransparency=1,
+            ScrollBarThickness=3, ScrollBarImageColor3=T.Accent,
+            CanvasSize=UDim2.new(0,0,0,0), AutomaticCanvasSize=Enum.AutomaticSize.Y,
+            ZIndex=51, Parent=dd,
+        })
+        local itemFrame=New("Frame",{Size=UDim2.new(1,0,0,0),AutomaticSize=Enum.AutomaticSize.Y,BackgroundTransparency=1,ZIndex=51,Parent=ddScroll})
+        Pad(itemFrame,3,3,4,4); List(itemFrame,nil,2)
+
+        local function closeDD()
+            open=false; arrow.Text="▾"
+            TwF(dd,{Size=UDim2.new(0,dd.AbsoluteSize.X,0,0)})
+            task.delay(0.22,function() dd.Visible=false end)
+        end
+
         for _,opt in ipairs(options) do
-            local ib=New("TextButton",{Size=UDim2.new(1,0,0,28),BackgroundColor3=T.ElementBG,BackgroundTransparency=1,Font=Enum.Font.Gotham,TextSize=11,TextColor3=T.TextSec,Text=opt,TextXAlignment=Enum.TextXAlignment.Left,BorderSizePixel=0,ZIndex=11,Parent=itemFrame}); Pad(ib,0,0,8,4); Corner(ib,T.SmallCorner)
-            ib.MouseEnter:Connect(function() ib.TextColor3=T.TextPri end); ib.MouseLeave:Connect(function() ib.TextColor3=T.TextSec end)
-            local function pick() current=opt; valLbl.Text=opt; open=false; dd.Visible=false; arrow.Text="▾"; wrapper.Size=UDim2.new(1,0,0,T.RowH); if cb then pcall(cb,opt) end end
-            ib.MouseButton1Click:Connect(pick); ib.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.Touch then pick() end end)
+            local ib=New("TextButton",{
+                Size=UDim2.new(1,0,0,30),
+                BackgroundColor3=T.ElementBG, BackgroundTransparency=1,
+                Font=Enum.Font.Gotham, TextSize=11, TextColor3=T.TextSec,
+                Text=opt, TextXAlignment=Enum.TextXAlignment.Left,
+                BorderSizePixel=0, ZIndex=52, Parent=itemFrame,
+            }); Pad(ib,0,0,8,4); Corner(ib,T.SmallCorner)
+            ib.MouseEnter:Connect(function() Tw(ib,{BackgroundTransparency=0.6,TextColor3=T.TextPri}) end)
+            ib.MouseLeave:Connect(function() Tw(ib,{BackgroundTransparency=1,TextColor3=T.TextSec}) end)
+            local function pick()
+                current=opt; valLbl.Text=opt; closeDD()
+                if cb then pcall(cb,opt) end
+            end
+            ib.MouseButton1Click:Connect(pick)
+            ib.InputBegan:Connect(function(i)
+                if i.UserInputType==Enum.UserInputType.Touch then
+                    -- small delay so the scroll gesture can be distinguished from a tap
+                    local startPos = i.Position
+                    task.delay(0.08, function()
+                        if (i.Position - startPos).Magnitude < 12 then pick() end
+                    end)
+                end
+            end)
         end
+
         local function toggle()
-            open=not open
-            if open then local h=math.min(#options*30+8,148); dd.Visible=true; TwF(dd,{Size=UDim2.new(1,0,0,h)}); wrapper.Size=UDim2.new(1,0,0,T.RowH+h+4); arrow.Text="▴"
-            else TwF(dd,{Size=UDim2.new(1,0,0,0)}); task.delay(0.22,function() dd.Visible=false end); wrapper.Size=UDim2.new(1,0,0,T.RowH); arrow.Text="▾" end
+            open = not open
+            if open then
+                -- Reposition dd to sit just below the header in absolute screen space
+                local abs = header.AbsolutePosition
+                local absSize = header.AbsoluteSize
+                local panelW = absSize.X
+                ddH = math.min(#options*30+8, 148)
+                dd.Size = UDim2.new(0,panelW,0,0)
+                dd.Position = UDim2.new(0, abs.X, 0, abs.Y + absSize.Y + 2)
+                dd.Visible = true
+                TwF(dd,{Size=UDim2.new(0,panelW,0,ddH)})
+                arrow.Text="▴"
+            else
+                closeDD()
+            end
         end
-        header.MouseButton1Click:Connect(toggle); header.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.Touch then toggle() end end)
+
+        -- Close dropdown when clicking anywhere outside it
+        local outsideConn
+        local function onOutsideInput(i)
+            if not open then return end
+            if i.UserInputType == Enum.UserInputType.MouseButton1
+            or i.UserInputType == Enum.UserInputType.Touch then
+                -- Check if click was inside the dd or header
+                local mp = i.Position
+                local ddPos = dd.AbsolutePosition; local ddSz = dd.AbsoluteSize
+                local hPos = header.AbsolutePosition; local hSz = header.AbsoluteSize
+                local inDD = mp.X>=ddPos.X and mp.X<=ddPos.X+ddSz.X and mp.Y>=ddPos.Y and mp.Y<=ddPos.Y+ddSz.Y
+                local inHeader = mp.X>=hPos.X and mp.X<=hPos.X+hSz.X and mp.Y>=hPos.Y and mp.Y<=hPos.Y+hSz.Y
+                if not inDD and not inHeader then closeDD() end
+            end
+        end
+        UserInputService.InputBegan:Connect(onOutsideInput)
+
+        header.MouseButton1Click:Connect(toggle)
+        header.InputBegan:Connect(function(i)
+            if i.UserInputType==Enum.UserInputType.Touch then toggle() end
+        end)
         return {Set=function(v) current=v; valLbl.Text=v end, Get=function() return current end}
     end
 
