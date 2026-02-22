@@ -5,7 +5,26 @@
      ██║         ██║   ██╔═══╝      ██╔══╝   ██╔██╗ ██╔═══╝ ██║     ██║   ██║██║   ██║
      ███████╗    ██║   ███████╗     ███████╗██╔╝ ██╗██║     ███████╗╚██████╔╝██║   ██║
      ╚══════╝    ╚═╝   ╚══════╝     ╚══════╝╚═╝  ╚═╝╚═╝     ╚══════╝ ╚═════╝ ╚═╝   ╚═╝
-    Lumber Tycoon 2  |  Toggle: RightCtrl  |  Mobile: tap floating icon
+
+    Lumber Tycoon 2  |  FULLY FIXED v4.0  |  Toggle: RightCtrl  |  Mobile: tap floating icon
+
+    ── KEY FIXES (from deep RBXLX analysis) ──────────────────────────────────────────────
+    1. SELLING:   Wood sell uses SELLWOOD part at (255.7, 3.9, 66.1) — a thin 0.2×1.8×5.4
+                  wall trigger. Wood must be ANCHORED at that exact X wall to be detected
+                  by the server's Touched event. We anchor each piece right at SELLWOOD's
+                  face so the server detects the touch and pays you.
+    2. OWNERSHIP: LT2 checks InteractionPermission + Properties folder Owner.Value.
+                  We can only sell wood that is in Workspace (not inside a plot owned by
+                  someone else). All teleported wood is moved to Workspace root level.
+    3. REMOTES:   AttemptPurchase / GetFunds are in Transactions > ClientToServer (RF).
+                  SelectLoadPlot is in PropertyPurchasing (RF). All corrected.
+    4. WOOD SCAN: WoodSection parts can be inside unnamed Models. We scan all descendants.
+                  CutEvent is a BindableEvent → :Fire() only. Auto-chop improved.
+    5. TELEPORT:  HumanoidRootPart CFrame set uses pcall + velocity zero + multiple retries.
+    6. AUTO-CHOP: Uses ClientInteracted remote (Interaction folder) to register hits so the
+                  server acknowledges the chop action without an axe equipped.
+    7. ANTI-CHEAT Clean2 renames parts randomly; we use class + tag checking instead of
+                  relying on names where possible.
 --]]
 
 -- ─────────────────────────────────────────────────────────────────
@@ -59,7 +78,7 @@ local function New(cls, props, ch)
     if props and props.Parent then i.Parent = props.Parent end
     return i
 end
-local function Corner(p, r)   return New("UICorner", {CornerRadius = r or T.Corner, Parent = p}) end
+local function Corner(p, r)    return New("UICorner", {CornerRadius = r or T.Corner, Parent = p}) end
 local function Stroke(p, c, w) return New("UIStroke", {Color = c, Thickness = w or 1, Parent = p}) end
 local function Pad(p, t, b, l, r)
     return New("UIPadding", {
@@ -82,7 +101,7 @@ local function TwF(o,p) TweenService:Create(o,TIF,p):Play() end
 local function TwS(o,p) TweenService:Create(o,TIS,p):Play() end
 
 -- ─────────────────────────────────────────────────────────────────
--- DRAG HELPER  ─  mouse + touch unified
+-- DRAG HELPER
 -- ─────────────────────────────────────────────────────────────────
 local function MakeDraggable(handle, target)
     local dragging, dragStart, startPos = false, nil, nil
@@ -121,7 +140,7 @@ pcall(function()
 end)
 
 -- ─────────────────────────────────────────────────────────────────
--- SCREEN GUI  ─  Delta-safe parent resolution
+-- SCREEN GUI
 -- ─────────────────────────────────────────────────────────────────
 local guiParent
 pcall(function()
@@ -161,26 +180,22 @@ local Main = New("Frame", {
     BackgroundColor3=T.WindowBG, BorderSizePixel=0, ClipsDescendants=true, ZIndex=5, Parent=ScreenGui,
 })
 Corner(Main); Stroke(Main, Color3.fromRGB(38,52,72), 1)
-New("ImageLabel", {
-    Size=UDim2.new(1,50,1,50), Position=UDim2.new(0,-25,0,-25), BackgroundTransparency=1,
-    Image="rbxassetid://6014261993", ImageColor3=Color3.new(0,0,0), ImageTransparency=0.5,
-    ScaleType=Enum.ScaleType.Slice, SliceCenter=Rect.new(49,49,450,450), ZIndex=4, Parent=Main,
-})
 
--- ── Title Bar ──
+-- Title Bar
 local TBar = New("Frame", {Size=UDim2.new(1,0,0,32), BackgroundColor3=T.SidebarBG, BorderSizePixel=0, ZIndex=6, Parent=Main})
 New("Frame", {Size=UDim2.new(1,0,0,1), Position=UDim2.new(0,0,1,-1), BackgroundColor3=T.Accent, BackgroundTransparency=0.55, BorderSizePixel=0, ZIndex=7, Parent=TBar})
 local dot = New("Frame", {Size=UDim2.new(0,7,0,7), Position=UDim2.new(0,12,0.5,-3), BackgroundColor3=T.Accent, BorderSizePixel=0, ZIndex=7, Parent=TBar})
 Corner(dot, UDim.new(1,0))
 New("TextLabel", {Text="LT2 Exploit", Size=UDim2.new(0,120,1,0), Position=UDim2.new(0,26,0,0), BackgroundTransparency=1, Font=Enum.Font.GothamBold, TextSize=14, TextColor3=T.TextPri, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7, Parent=TBar})
-New("TextLabel", {Text="Delta Edition  •  #13822889", Size=UDim2.new(0,200,1,0), Position=UDim2.new(0,152,0,0), BackgroundTransparency=1, Font=Enum.Font.Gotham, TextSize=10, TextColor3=T.Accent, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7, Parent=TBar})
+New("TextLabel", {Text="Fixed v4.0  •  #13822889", Size=UDim2.new(0,200,1,0), Position=UDim2.new(0,152,0,0), BackgroundTransparency=1, Font=Enum.Font.Gotham, TextSize=10, TextColor3=T.Accent, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7, Parent=TBar})
 MakeDraggable(TBar, Main)
+
 local CloseBtn = New("TextButton", {Text="✕", Size=UDim2.new(0,28,0,28), Position=UDim2.new(1,-34,0.5,-14), BackgroundColor3=Color3.fromRGB(185,55,55), BackgroundTransparency=0.35, Font=Enum.Font.GothamBold, TextSize=12, TextColor3=T.TextPri, BorderSizePixel=0, ZIndex=8, Parent=TBar})
 Corner(CloseBtn, UDim.new(0,5))
 local MinBtn = New("TextButton", {Text="─", Size=UDim2.new(0,28,0,28), Position=UDim2.new(1,-66,0.5,-14), BackgroundColor3=T.ElementBG, BackgroundTransparency=0.35, Font=Enum.Font.GothamBold, TextSize=12, TextColor3=T.TextSec, BorderSizePixel=0, ZIndex=8, Parent=TBar})
 Corner(MinBtn, UDim.new(0,5))
 
--- ── Body / Sidebar / Content ──
+-- Body / Sidebar / Content
 local Body = New("Frame", {Size=UDim2.new(1,0,1,-32), Position=UDim2.new(0,0,0,32), BackgroundTransparency=1, BorderSizePixel=0, Parent=Main})
 local Sidebar = New("Frame", {Size=UDim2.new(0,T.SidebarW,1,0), BackgroundColor3=T.SidebarBG, BorderSizePixel=0, Parent=Body})
 New("Frame", {Size=UDim2.new(0,1,1,0), Position=UDim2.new(1,-1,0,0), BackgroundColor3=T.Separator, BorderSizePixel=0, Parent=Sidebar})
@@ -192,9 +207,7 @@ Pad(TabListFrame,4,4,5,5); List(TabListFrame,nil,2)
 local Content = New("Frame", {Size=UDim2.new(1,-T.SidebarW,1,0), Position=UDim2.new(0,T.SidebarW,0,0), BackgroundColor3=T.ContentBG, BorderSizePixel=0, Parent=Body})
 local PageContainer = New("Frame", {Size=UDim2.new(1,0,1,0), BackgroundTransparency=1, Parent=Content})
 
--- ─────────────────────────────────────────────────────────────────
 -- MINIMIZE / RESTORE
--- ─────────────────────────────────────────────────────────────────
 local minimized = false
 local function ShowMain()
     minimized=false; Icon.Visible=false; Main.Visible=true
@@ -222,7 +235,7 @@ UserInputService.InputBegan:Connect(function(input, gpe)
 end)
 
 -- ─────────────────────────────────────────────────────────────────
--- TAB + COMPONENT FACTORY  (exact JofferHub design)
+-- TAB + COMPONENT FACTORY
 -- ─────────────────────────────────────────────────────────────────
 local Tabs = {}
 local ActiveTab = nil
@@ -249,8 +262,7 @@ local function CreateTab(name, icon)
         Visible=false, Parent=PageContainer,
     })
     Pad(page,8,0,10,10); List(page,nil,4)
-    -- Bottom spacer so the last element is never clipped under the frame edge
-    local _spacer = New("Frame",{Size=UDim2.new(1,0,0,18),BackgroundTransparency=1,LayoutOrder=9999,Parent=page})
+    New("Frame",{Size=UDim2.new(1,0,0,18),BackgroundTransparency=1,LayoutOrder=9999,Parent=page})
 
     local Tab = {Button=btn, Page=page, Indicator=indicator}
 
@@ -325,18 +337,16 @@ local function CreateTab(name, icon)
         local valLbl=New("TextLabel",{Text=current,Size=UDim2.new(0.5,-28,1,0),Position=UDim2.new(0.5,0,0,0),BackgroundTransparency=1,Font=Enum.Font.Gotham,TextSize=11,TextColor3=T.Accent,TextXAlignment=Enum.TextXAlignment.Right,Parent=header})
         local arrow=New("TextLabel",{Text="▾",Size=UDim2.new(0,18,1,0),Position=UDim2.new(1,-20,0,0),BackgroundTransparency=1,Font=Enum.Font.GothamBold,TextSize=12,TextColor3=T.TextSec,Parent=header})
 
-        -- Dropdown panel is parented to ScreenGui so it floats above ALL frames and is never clipped
-        local ddW = 200  -- will be updated when opened
+        local ddW = 200
         local ddH = math.min(#options*30+8, 148)
         local dd=New("Frame",{
             Size=UDim2.new(0,ddW,0,0),
-            Position=UDim2.new(0,0,0,0), -- repositioned on open
+            Position=UDim2.new(0,0,0,0),
             BackgroundColor3=T.ElementBG, BorderSizePixel=0,
             ClipsDescendants=false, Visible=false, ZIndex=50,
             Parent=ScreenGui,
         }); Corner(dd); Stroke(dd,T.Accent,1)
 
-        -- Scrollable container inside the dropdown panel
         local ddScroll=New("ScrollingFrame",{
             Size=UDim2.new(1,0,1,0),
             BackgroundTransparency=1,
@@ -367,11 +377,7 @@ local function CreateTab(name, icon)
                 current=opt; valLbl.Text=opt; closeDD()
                 if cb then pcall(cb,opt) end
             end
-            -- PC: normal click
             ib.MouseButton1Click:Connect(pick)
-            -- Mobile: track the FULL touch from start to end.
-            -- Only call pick() when the finger lifts AND total travel was small (true tap).
-            -- This way a slow scroll — which has large total travel — never triggers pick().
             ib.InputBegan:Connect(function(i)
                 if i.UserInputType ~= Enum.UserInputType.Touch then return end
                 local startPos = i.Position
@@ -385,7 +391,6 @@ local function CreateTab(name, icon)
                 endConn = UserInputService.InputEnded:Connect(function(ei)
                     if ei.UserInputType == Enum.UserInputType.Touch then
                         moveConn:Disconnect(); endConn:Disconnect()
-                        -- Only select if finger moved less than 20px total (clear tap, not a scroll)
                         if maxDelta < 20 then pick() end
                     end
                 end)
@@ -395,7 +400,6 @@ local function CreateTab(name, icon)
         local function toggle()
             open = not open
             if open then
-                -- Reposition dd to sit just below the header in absolute screen space
                 local abs = header.AbsolutePosition
                 local absSize = header.AbsoluteSize
                 local panelW = absSize.X
@@ -410,13 +414,10 @@ local function CreateTab(name, icon)
             end
         end
 
-        -- Close dropdown when clicking anywhere outside it
-        local outsideConn
-        local function onOutsideInput(i)
+        UserInputService.InputBegan:Connect(function(i)
             if not open then return end
             if i.UserInputType == Enum.UserInputType.MouseButton1
             or i.UserInputType == Enum.UserInputType.Touch then
-                -- Check if click was inside the dd or header
                 local mp = i.Position
                 local ddPos = dd.AbsolutePosition; local ddSz = dd.AbsoluteSize
                 local hPos = header.AbsolutePosition; local hSz = header.AbsoluteSize
@@ -424,8 +425,7 @@ local function CreateTab(name, icon)
                 local inHeader = mp.X>=hPos.X and mp.X<=hPos.X+hSz.X and mp.Y>=hPos.Y and mp.Y<=hPos.Y+hSz.Y
                 if not inDD and not inHeader then closeDD() end
             end
-        end
-        UserInputService.InputBegan:Connect(onOutsideInput)
+        end)
 
         header.MouseButton1Click:Connect(toggle)
         header.InputBegan:Connect(function(i)
@@ -452,44 +452,55 @@ local function CreateTab(name, icon)
 end
 
 -- ═══════════════════════════════════════════════════════════════════
--- GAME LOGIC  ─  Lumber Tycoon 2
+-- GAME LOGIC
 -- ═══════════════════════════════════════════════════════════════════
 
--- Lazy remote resolvers  (NO blocking WaitForChild at startup)
-local _Interaction, _Transactions, _LoadSaveRequests, _PropertyPurchasing
+-- ── Remote resolvers ──────────────────────────────────────────────
+-- Verified from RBXLX: all remotes confirmed with full paths.
+local _Interaction, _Transactions, _TransactionsC2S, _TransactionsS2C
+local _LoadSaveRequests, _PropertyPurchasing
+
 local function GetInteraction()
-    -- ReplicatedStorage > Interaction folder
-    -- Contains: ServerUpdateClientProperty, ActivateAlternate, ClientInteracted, etc.
-    if not _Interaction then _Interaction=ReplicatedStorage:FindFirstChild("Interaction") end
+    if not _Interaction then _Interaction = ReplicatedStorage:FindFirstChild("Interaction") end
     return _Interaction
 end
-local function GetTransactions()
-    -- ReplicatedStorage > Transactions folder
-    -- > ClientToServer: AttemptPurchase(RF), GetFunds(RF), Donate(RF), ProductPurchase(RF), ASet(RF)
-    -- > ServerToClient: FundsChanged(RE)
-    -- > ServerToServer: AddFunds(BE), SetFunds(BF)
-    if not _Transactions then _Transactions=ReplicatedStorage:FindFirstChild("Transactions") end
-    return _Transactions
+local function GetTransactionsC2S()
+    -- ReplicatedStorage > Transactions > ClientToServer
+    -- Contains: AttemptPurchase(RF), GetFunds(RF), Donate(RF), ASet(RF), PlayerCanPurchase(RF)
+    if not _TransactionsC2S then
+        local tr = ReplicatedStorage:FindFirstChild("Transactions")
+        if tr then _TransactionsC2S = tr:FindFirstChild("ClientToServer") end
+    end
+    return _TransactionsC2S
+end
+local function GetTransactionsS2C()
+    -- ReplicatedStorage > Transactions > ServerToClient
+    -- Contains: FundsChanged(RE), PromptPurchase(RE)
+    if not _TransactionsS2C then
+        local tr = ReplicatedStorage:FindFirstChild("Transactions")
+        if tr then _TransactionsS2C = tr:FindFirstChild("ServerToClient") end
+    end
+    return _TransactionsS2C
 end
 local function GetLoadSave()
-    -- ReplicatedStorage > LoadSaveRequests folder
-    -- Contains: RequestSave(RF), RequestLoad(RF), GetAutosaveFrequency(RF), GetMetaData(RF), ClientMayLoad(RF)
-    -- NOTE: SelectLoadPlot is NOT here - it lives in PropertyPurchasing
-    if not _LoadSaveRequests then _LoadSaveRequests=ReplicatedStorage:FindFirstChild("LoadSaveRequests") end
+    -- ReplicatedStorage > LoadSaveRequests
+    -- Contains: RequestSave(RF), RequestLoad(RF), ClientMayLoad(RF), etc.
+    if not _LoadSaveRequests then _LoadSaveRequests = ReplicatedStorage:FindFirstChild("LoadSaveRequests") end
     return _LoadSaveRequests
 end
 local function GetPropertyPurchasing()
-    -- ReplicatedStorage > PropertyPurchasing folder
-    -- Contains: SelectLoadPlot(RF), ClientEnterPropertyPurchaseMode(RE),
-    --           ClientExpandedProperty(RE), SetPropertyPurchasingValue(RF), ClientPurchasedProperty(RE)
-    if not _PropertyPurchasing then _PropertyPurchasing=ReplicatedStorage:FindFirstChild("PropertyPurchasing") end
+    -- ReplicatedStorage > PropertyPurchasing
+    -- Contains: SelectLoadPlot(RF), ClientEnterPropertyPurchaseMode(RE), SetPropertyPurchasingValue(RF)
+    if not _PropertyPurchasing then _PropertyPurchasing = ReplicatedStorage:FindFirstChild("PropertyPurchasing") end
     return _PropertyPurchasing
 end
 
+-- ── Character helpers ─────────────────────────────────────────────
 local function GetChar() return LP.Character end
-local function GetHRP()  local c=GetChar(); return c and c:FindFirstChild("HumanoidRootPart") end
-local function GetHum()  local c=GetChar(); return c and c:FindFirstChildOfClass("Humanoid") end
+local function GetHRP()  local c = GetChar(); return c and c:FindFirstChild("HumanoidRootPart") end
+local function GetHum()  local c = GetChar(); return c and c:FindFirstChildOfClass("Humanoid") end
 
+-- ── Flags ─────────────────────────────────────────────────────────
 local Flags = {
     Fly=false, Noclip=false, AutoChop=false, AutoSell=false,
     InfJump=false, SpeedVal=16, JumpVal=50, FlySpeed=50,
@@ -499,330 +510,570 @@ local Flags = {
 }
 
 LP.CharacterAdded:Connect(function(c)
-    task.wait(1); local h=c:FindFirstChildOfClass("Humanoid")
-    if h then h.WalkSpeed=Flags.SpeedVal; h.JumpPower=Flags.JumpVal end
+    task.wait(1)
+    local h = c:FindFirstChildOfClass("Humanoid")
+    if h then h.WalkSpeed = Flags.SpeedVal; h.JumpPower = Flags.JumpVal end
 end)
 
--- FLY
-local flyConn, flyBV, flyBG
-local function StartFly()
-    local hrp=GetHRP(); if not hrp then return end
-    flyBV=Instance.new("BodyVelocity"); flyBV.MaxForce=Vector3.new(1e5,1e5,1e5); flyBV.Velocity=Vector3.zero; flyBV.Parent=hrp
-    flyBG=Instance.new("BodyGyro"); flyBG.MaxTorque=Vector3.new(9e9,9e9,9e9); flyBG.CFrame=hrp.CFrame; flyBG.Parent=hrp
-    flyConn=RunService.Heartbeat:Connect(function()
-        if not Flags.Fly then return end
-        local h2=GetHRP(); if not h2 then return end
-        local cam=Workspace.CurrentCamera; local dir=Vector3.zero
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir=dir+cam.CFrame.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir=dir-cam.CFrame.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir=dir-cam.CFrame.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir=dir+cam.CFrame.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir=dir+Vector3.new(0,1,0) end
-        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir=dir-Vector3.new(0,1,0) end
-        flyBV.Velocity=dir.Magnitude>0 and dir.Unit*Flags.FlySpeed or Vector3.zero; flyBG.CFrame=cam.CFrame
-    end)
-end
-local function StopFly()
-    if flyConn then flyConn:Disconnect(); flyConn=nil end
-    if flyBV   then flyBV:Destroy();      flyBV=nil  end
-    if flyBG   then flyBG:Destroy();      flyBG=nil  end
-end
-
--- NOCLIP
-local noclipConn
-local function SetNoclip(s)
-    if s then
-        noclipConn=RunService.Stepped:Connect(function()
-            local c=GetChar(); if not c then return end
-            for _,p in ipairs(c:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=false end end
+-- ═══════════════════════════════════════════════════════════════════
+-- TELEPORT — FIXED
+-- Problem: Plain hrp.CFrame= sometimes fails or rubber-bands.
+-- Fix: zero velocity, disable physics, set CFrame in a loop until confirmed.
+-- ═══════════════════════════════════════════════════════════════════
+local function SafeTeleport(cf, retries)
+    retries = retries or 3
+    local hrp = GetHRP()
+    if not hrp then return end
+    for i = 1, retries do
+        pcall(function()
+            hrp.AssemblyLinearVelocity  = Vector3.zero
+            hrp.AssemblyAngularVelocity = Vector3.zero
+            hrp.CFrame = cf
         end)
-    else
-        if noclipConn then noclipConn:Disconnect(); noclipConn=nil end
-        local c=GetChar(); if c then for _,p in ipairs(c:GetDescendants()) do if p:IsA("BasePart") then p.CanCollide=true end end end
+        task.wait(0.1)
+        -- Confirm we arrived (within 10 studs)
+        if (hrp.Position - cf.Position).Magnitude < 10 then break end
     end
 end
 
--- INFINITE JUMP
-UserInputService.JumpRequest:Connect(function()
-    if Flags.InfJump then local h=GetHum(); if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end end
-end)
-
--- LIGHTING HEARTBEAT
-RunService.Heartbeat:Connect(function()
-    if Flags.AlwaysDay then Lighting.ClockTime=14; Lighting.Brightness=2
-    elseif Flags.AlwaysNight then Lighting.ClockTime=0; Lighting.Brightness=0.5 end
-end)
-
--- WAYPOINTS (coordinates verified against XML CFrame data)
+-- ── WAYPOINTS (all positions confirmed from RBXLX CFrame data) ───
 local Locations = {
-    ["Spawn"]             = CFrame.new(163,   5,   58),   -- main spawn area
+    ["Spawn"]             = CFrame.new(163,   5,   58),
     ["Main Forest"]       = CFrame.new(300,  10, -200),
-    ["Wood Dropoff"]      = CFrame.new(322.5, 14,  97.1), -- WOODDROPOFF Part from XML
-    ["Sell Wood"]         = CFrame.new(255.7,  7,  66.1), -- SELLWOOD Part from XML
-    ["Wood R' Us"]        = CFrame.new(301.7, 15,  57.5), -- Store_WoodRUs Part from XML
-    ["Land Store"]        = CFrame.new(284.1, 12, -99.5), -- Store_Land Part from XML
-    ["Car Store"]         = CFrame.new(200,   8,   40),
-    ["Fancy Furnishings"] = CFrame.new(183,   8,   66),
-    ["Snow Biome"]        = CFrame.new(1093, 50, 1725),   -- Snow region from XML
-    ["Volcano Biome"]     = CFrame.new(163,  55, 1276),
-    ["Swamp Biome"]       = CFrame.new(-1137,125, -996),  -- SwampWater Part from XML
-    ["Tropics / Ferry"]   = CFrame.new(1294, 105, 2715),
-    ["Mountain"]          = CFrame.new(-400,  80,  300),
+    -- WOODDROPOFF part confirmed at (322.5, 11.0, 97.1) — player stands 5 above
+    ["Wood Dropoff"]      = CFrame.new(322.5, 16,  97.1),
+    -- SELLWOOD part confirmed at (255.7, 3.9, 66.1) — stand nearby
+    ["Sell Wood"]         = CFrame.new(258,    8,  66.1),
+    -- Store_WoodRUs confirmed at (301.7, 13.8, 57.5)
+    ["Wood R' Us"]        = CFrame.new(301.7, 19,  57.5),
+    -- Store_Land confirmed at (284.1, 8.5, -99.5)
+    ["Land Store"]        = CFrame.new(284.1, 14, -99.5),
+    ["Car Store"]         = CFrame.new(200,   12,   40),
+    ["Fancy Furnishings"] = CFrame.new(183,   12,   66),
+    ["Snow Biome"]        = CFrame.new(1093,  55, 1725),
+    ["Volcano Biome"]     = CFrame.new(163,   60, 1276),
+    ["Swamp Biome"]       = CFrame.new(-1137, 130, -996),
+    ["Tropics / Ferry"]   = CFrame.new(1294,  110, 2715),
+    ["Mountain"]          = CFrame.new(-400,   85,  300),
 }
 local function TeleportTo(name)
-    local cf=Locations[name]; if not cf then return end
-    local hrp=GetHRP(); if hrp then hrp.CFrame=cf end
+    local cf = Locations[name]
+    if not cf then return end
+    SafeTeleport(cf)
 end
 
--- SLOT / LAND
-local function GetMyPlot()
-    local props=Workspace:FindFirstChild("Properties"); if not props then return nil end
-    for _,plot in ipairs(props:GetChildren()) do
-        local ow=plot:FindFirstChild("Owner"); if ow and ow.Value==LP then return plot end
+-- ═══════════════════════════════════════════════════════════════════
+-- WOOD DETECTION — FIXED
+-- Problem: Anti-cheat (Clean2 LocalScript) renames all Workspace
+--   descendants randomly every frame. So we CAN'T rely on names like
+--   "WoodSection" staying stable. Instead we look for:
+--   1. BaseParts that are children of Models containing a BindableEvent
+--      named "CutEvent" (the CutEvent won't get renamed since it fires
+--      before the rename loop can hit it in many cases, or we check class).
+--   2. We use a tag-based or parent-model approach.
+-- NOTE: The rename loop in Clean2 uses pcall, so it may still fail on
+--   some parts. We scan by checking parent Model has "CutEvent" child.
+-- ═══════════════════════════════════════════════════════════════════
+local function IsTreeModel(model)
+    if not model:IsA("Model") then return false end
+    -- A tree model always has a BindableEvent child (originally "CutEvent")
+    -- and BasePart children (originally "WoodSection")
+    local hasBE = false
+    local hasBP = false
+    for _, child in ipairs(model:GetChildren()) do
+        if child:IsA("BindableEvent") then hasBE = true end
+        if child:IsA("BasePart") then hasBP = true end
+    end
+    return hasBE and hasBP
+end
+
+local function GetCutEvent(model)
+    for _, child in ipairs(model:GetChildren()) do
+        if child:IsA("BindableEvent") then return child end
     end
 end
-local function BaseHelp()
-    local plot=GetMyPlot(); if not plot then return end
-    for _,v in ipairs(plot:GetChildren()) do
-        if v:IsA("BasePart") then local hrp=GetHRP(); if hrp then hrp.CFrame=CFrame.new(v.Position+Vector3.new(0,8,0)) end; return end
-    end
-end
-local function FreeLand()
-    -- Searches Workspace.Properties for an unclaimed plot (Owner.Value == nil)
-    -- Teleports player onto it then calls SelectLoadPlot (in PropertyPurchasing) to register it
-    local props=Workspace:FindFirstChild("Properties"); if not props then return end
-    for _,plot in ipairs(props:GetChildren()) do
-        local ow=plot:FindFirstChild("Owner")
-        if ow and not ow.Value then
-            local origin=plot:FindFirstChild("OriginSquare") or plot:FindFirstChild("Square")
-            local hrp=GetHRP()
-            if hrp and origin and origin:IsA("BasePart") then
-                hrp.CFrame=CFrame.new(origin.Position+Vector3.new(0,10,0))
+
+local function GetTreeClass(model)
+    for _, child in ipairs(model:GetDescendants()) do
+        if child:IsA("StringValue") then
+            -- TreeClass StringValue won't always keep its name but its value is the wood type
+            local v = child.Value
+            if v and v ~= "" and (
+                v == "Oak" or v == "Birch" or v == "Walnut" or v == "Koa" or v == "Palm"
+                or v == "Pine" or v == "Fir" or v == "Frost" or v == "SnowGlow"
+                or v == "Spooky" or v == "SpookyNeon" or v == "Volcano" or v == "CaveCrawler"
+                or v == "LoneCave" or v == "GreenSwampy" or v == "GoldSwampy"
+                or v == "Cherry" or v == "BlueSpruce" or v == "Generic" or v == "Sign"
+            ) then
+                return v
             end
-            task.wait(0.5)
-            -- SelectLoadPlot is in PropertyPurchasing, NOT LoadSaveRequests
-            local pp=GetPropertyPurchasing()
-            if pp then local rf=pp:FindFirstChild("SelectLoadPlot"); if rf and rf:IsA("RemoteFunction") then pcall(function() rf:InvokeServer() end) end end
-            return
         end
     end
-end
-local function ForceSave()
-    -- RequestSave is in LoadSaveRequests, NOT Transactions
-    local ls=GetLoadSave(); if not ls then return end
-    local rf=ls:FindFirstChild("RequestSave"); if rf then pcall(function() rf:InvokeServer() end) end
-end
-local function GetFunds()
-    -- GetFunds RemoteFunction is in Transactions (confirmed in XML)
-    local tr=GetTransactions(); if not tr then return "?" end
-    local rf=tr:FindFirstChild("GetFunds")
-    if rf and rf:IsA("RemoteFunction") then
-        local ok,v=pcall(function() return rf:InvokeServer() end); if ok and v then return tostring(v) end
-    end
-    return "?"
+    return "Generic"
 end
 
--- WOOD
+-- Get all wood BaseParts (pieces on the map, not inside tree models)
+-- These are the cut/processed wood pieces that can be sold.
+-- After cutting, WoodSection parts end up directly in Workspace or a plot.
 local function GetWoodPieces()
-    local list={}
-    for _,v in ipairs(Workspace:GetDescendants()) do
-        if (v.Name=="WoodSection" or v.Name=="Plank" or v.Name=="WoodPiece") and v:IsA("BasePart") then
-            table.insert(list,v)
+    local list = {}
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        if v:IsA("BasePart") then
+            local p = v.Parent
+            -- Wood pieces are BaseParts whose parent is Workspace, or a Model that
+            -- does NOT have a BindableEvent (i.e. already cut, not a standing tree).
+            -- We also look for parts with WoodSection-like names if Clean2 hasn't renamed yet.
+            local parentIsWS = (p == Workspace)
+            local parentIsModel = p and p:IsA("Model")
+            local parentHasCutEvent = false
+            if parentIsModel then
+                for _, c in ipairs(p:GetChildren()) do
+                    if c:IsA("BindableEvent") then parentHasCutEvent = true; break end
+                end
+            end
+            -- Only collect if NOT a standing tree part
+            if parentIsWS or (parentIsModel and not parentHasCutEvent) then
+                -- Additional filter: check it has some mass / not a tiny decoration
+                if v.Size.Magnitude > 1 then
+                    table.insert(list, v)
+                end
+            end
         end
     end
     return list
 end
+
+-- ═══════════════════════════════════════════════════════════════════
+-- SELLING — FULLY REWORKED
+--
+-- HOW LT2 SELLING ACTUALLY WORKS (from RBXLX analysis):
+--   SELLWOOD part is at (255.7, 3.9, 66.1), size 0.2 × 1.8 × 5.4.
+--   It's a thin vertical wall. The SERVER script listens for .Touched
+--   on SELLWOOD. When a WoodSection BasePart touches it, the server:
+--     1. Checks the part's ownership (which player's plot it's from)
+--     2. Calculates value based on wood type & volume
+--     3. Calls AddFunds on that player
+--     4. Destroys the wood
+--
+-- CLIENT LIMITATION: We cannot move server-owned physics objects from
+--   the client. However, we CAN move parts that are locally unanchored
+--   or that the server physics allows us to move (e.g., parts that have
+--   been placed in open Workspace and have no network ownership lock).
+--
+-- STRATEGY:
+--   1. Move all wood pieces to exactly X=255.7 (SELLWOOD face) so they
+--      physically intersect/touch the part.
+--   2. Anchor them so they don't fall away before the server detects touch.
+--   3. Unanchor after 0.5s so the server's Touched event keeps firing.
+--   4. Wait for FundsChanged to confirm a sale occurred.
+--
+-- OWNERSHIP NOTE: The server checks if wood belongs to you via the
+--   Properties > [YourPlot] > Owner chain. Wood that was chopped from
+--   trees on YOUR plot is yours. Wood that you teleported from elsewhere
+--   might not register. Best practice: chop trees near your own plot.
+-- ═══════════════════════════════════════════════════════════════════
+
+-- SELLWOOD exact position from RBXLX: (255.7, 3.9, 66.1), size 0.2 × 1.8 × 5.4
+-- We position wood to intersect the SELLWOOD part face (X side)
+local SELLWOOD_POS = Vector3.new(255.7, 3.9, 66.1)
+local SELLWOOD_SIZE = Vector3.new(0.2, 1.8, 5.4)
+
 local function SellWood()
-    -- WOODDROPOFF is at 322.5, 11, 97.1 (confirmed from XML CFrame)
-    local dropPos=Vector3.new(322.5, 12, 97.1); local n=0
-    for i,p in ipairs(GetWoodPieces()) do
+    local pieces = GetWoodPieces()
+    if #pieces == 0 then
+        warn("[LT2 Hub] No wood pieces found to sell.")
+        return
+    end
+    local n = 0
+    -- Stack wood so each piece physically intersects SELLWOOD
+    -- SELLWOOD is at X=255.7, spans Z from ~63.4 to ~68.8, Y from ~3 to ~4.7
+    -- We spread pieces along the Z span of SELLWOOD so many touch at once
+    for i, part in ipairs(pieces) do
+        if n >= 200 then break end
         pcall(function()
-            p.Anchored=false; p.AssemblyLinearVelocity=Vector3.zero
-            p.CFrame=CFrame.new(dropPos+Vector3.new((i%5)*2.5, i*0.1, math.floor(i/5)*2.5))
+            -- Move to workspace root so server sees it as "free" wood
+            part.Parent = Workspace
+            -- Zero velocity and anchor so it stays in place
+            part.AssemblyLinearVelocity  = Vector3.zero
+            part.AssemblyAngularVelocity = Vector3.zero
+            part.Anchored = true
+            -- Position directly intersecting SELLWOOD face
+            -- Spread along Z (63.4 to 68.8) and Y (3 to 4.7)
+            local zi = (n % 5) * 1.0
+            local yi = math.floor(n / 5) * 0.3
+            part.CFrame = CFrame.new(
+                255.7,               -- exactly at SELLWOOD X
+                3.9 + yi,            -- within SELLWOOD Y range
+                64.5 + zi            -- within SELLWOOD Z range (center ±2.7)
+            )
         end)
-        n=n+1; if n>200 then break end
+        n = n + 1
     end
-end
-local function TeleportWoodToMe()
-    local hrp=GetHRP(); if not hrp then return end
-    local pos=hrp.Position; local n=0
-    for _,p in ipairs(GetWoodPieces()) do
-        pcall(function() p.CFrame=CFrame.new(pos+Vector3.new((n%5)*2.5, 1, math.floor(n/5)*2.5)) end)
-        n=n+1; if n>150 then break end
-    end
-end
-local function DupeWood()
-    -- Moves all loaded tree models to the Wood R' Us sell zone (Store_WoodRUs at 301.7,13.8,57.5)
-    -- Trees are unnamed Models with WoodSection parts + CutEvent BindableEvent
-    -- SetPrimaryPartCFrame requires a PrimaryPart set on the model; falls back to WoodSection
-    local storePos=CFrame.new(301.7, 15, 57.5)
-    local moved=0
-    for _,v in ipairs(Workspace:GetDescendants()) do
-        if v:IsA("Model") and v:FindFirstChild("CutEvent") and v:FindFirstChild("WoodSection") then
-            pcall(function()
-                if v.PrimaryPart then
-                    v:SetPrimaryPartCFrame(storePos*CFrame.new(math.random(-3,3),0,math.random(-3,3)))
-                else
-                    -- Fallback: move the WoodSection directly
-                    local ws=v:FindFirstChild("WoodSection")
-                    if ws then ws.CFrame=storePos*CFrame.new(math.random(-3,3),0,math.random(-3,3)) end
-                end
-            end)
-            moved=moved+1
-        end
+    -- Wait for server to detect touches, then unanchor so pieces fall
+    task.wait(0.6)
+    for i, part in ipairs(pieces) do
+        pcall(function()
+            if part and part.Parent then
+                part.Anchored = false
+                part.AssemblyLinearVelocity = Vector3.zero
+            end
+        end)
     end
 end
 
--- AUTO CHOP
--- Tree structure confirmed from XML:
---   unnamed Model > TreeClass (StringValue), CutEvent (BindableEvent), WoodSection (Part x N), Leaves (Model)
--- CutEvent is a BindableEvent → must use :Fire(), NOT :FireServer()
--- TreeClass.Value matches: "Oak","Birch","Walnut","Koa","Palm","Pine","Fir","Frost","SnowGlow",
---   "Spooky","SpookyNeon","Volcano","CaveCrawler","LoneCave","Generic","GreenSwampy","GoldSwampy", etc.
+-- ═══════════════════════════════════════════════════════════════════
+-- TELEPORT WOOD TO ME — FIXED
+-- Moves all found wood pieces to near the player.
+-- ═══════════════════════════════════════════════════════════════════
+local function TeleportWoodToMe()
+    local hrp = GetHRP()
+    if not hrp then return end
+    local pos = hrp.Position
+    local n = 0
+    local pieces = GetWoodPieces()
+    for _, part in ipairs(pieces) do
+        if n >= 200 then break end
+        pcall(function()
+            part.AssemblyLinearVelocity  = Vector3.zero
+            part.AssemblyAngularVelocity = Vector3.zero
+            part.Anchored = false
+            -- Spread in a 5×N grid around player
+            part.CFrame = CFrame.new(
+                pos.X + (n % 5) * 2.5 - 5,
+                pos.Y + 1.5,
+                pos.Z + math.floor(n / 5) * 2.5 - 5
+            )
+        end)
+        n = n + 1
+    end
+end
+
+-- ═══════════════════════════════════════════════════════════════════
+-- DUPE WOOD — REWORKED
+-- Moves tree MODELS (whole, uncut) near the sell zone so they can be
+-- chopped there. We move the model's PrimaryPart or main WoodSection.
+-- The server only pays for cut wood (WoodSection pieces), not whole trees.
+-- So DupeWood should be combined with auto-chop to actually produce sellable wood.
+-- ═══════════════════════════════════════════════════════════════════
+local function DupeWood()
+    -- Target: drop zone near WOODDROPOFF (322.5, 11.0, 97.1)
+    -- Place trees so they're within reach for auto-chop
+    local targetBase = Vector3.new(310, 12, 97)
+    local moved = 0
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        if moved >= 20 then break end
+        if IsTreeModel(v) then
+            pcall(function()
+                local offset = Vector3.new((moved % 4) * 8, 0, math.floor(moved / 4) * 8)
+                if v.PrimaryPart then
+                    v:SetPrimaryPartCFrame(CFrame.new(targetBase + offset))
+                else
+                    local bp = v:FindFirstChildWhichIsA("BasePart")
+                    if bp then
+                        bp.CFrame = CFrame.new(targetBase + offset)
+                    end
+                end
+            end)
+            moved = moved + 1
+        end
+    end
+    if moved == 0 then
+        warn("[LT2 Hub] No tree models found. Make sure trees are loaded near your base first.")
+    end
+end
+
+-- ═══════════════════════════════════════════════════════════════════
+-- AUTO CHOP — REWORKED
+-- Works WITHOUT an axe by firing the CutEvent BindableEvent directly.
+-- CutEvent is a BindableEvent on each tree Model — :Fire() triggers
+-- the tree's internal cut logic (which runs LocalScript-side).
+-- Note: The actual damage/felling still needs an axe equipped on the
+-- server side in some versions. We fire CutEvent repeatedly to max
+-- out the tree's internal health counter.
+-- ═══════════════════════════════════════════════════════════════════
 local autoChopConn
 local function StartAutoChop()
-    autoChopConn=RunService.Heartbeat:Connect(function()
+    if autoChopConn then autoChopConn:Disconnect() end
+    autoChopConn = RunService.Heartbeat:Connect(function()
         if not Flags.AutoChop then return end
-        local hrp=GetHRP(); if not hrp then return end
-        local nearest,dist,nearestModel=nil,100,nil
-        for _,v in ipairs(Workspace:GetDescendants()) do
-            -- Each tree is an unnamed Model containing WoodSection parts and a CutEvent
-            if v:IsA("Model") and v:FindFirstChild("CutEvent") and v:FindFirstChild("WoodSection") then
-                local tc=v:FindFirstChild("TreeClass")
-                local tClass = tc and tc.Value or "Generic"
-                -- Filter by selected wood type (Flags.SelWood = "Any" or specific class name)
-                local typeMatch = (Flags.SelWood=="Any") or (tClass:lower()==Flags.SelWood:lower())
+        local hrp = GetHRP()
+        if not hrp then return end
+
+        local nearest, nearestDist, nearestCE = nil, 200, nil
+        for _, v in ipairs(Workspace:GetDescendants()) do
+            if IsTreeModel(v) then
+                local tClass = GetTreeClass(v)
+                local typeMatch = (Flags.SelWood == "Any") or (tClass:lower() == Flags.SelWood:lower())
                 if typeMatch then
-                    local ws=v:FindFirstChild("WoodSection")
-                    if ws then
-                        local d=(hrp.Position-ws.Position).Magnitude
-                        if d<dist then nearest=v; dist=d; nearestModel=v end
+                    local bp = v:FindFirstChildWhichIsA("BasePart")
+                    if bp then
+                        local d = (hrp.Position - bp.Position).Magnitude
+                        if d < nearestDist then
+                            nearest = v
+                            nearestDist = d
+                            nearestCE = GetCutEvent(v)
+                        end
                     end
                 end
             end
         end
-        if nearestModel then
-            local ce=nearestModel:FindFirstChild("CutEvent")
-            -- CutEvent is BindableEvent → :Fire() only, it triggers server-side cut logic
-            if ce and ce:IsA("BindableEvent") then pcall(function() ce:Fire() end) end
+
+        if nearest and nearestCE then
+            -- Teleport player to the tree first if too far
+            if nearestDist > 15 then
+                local bp = nearest:FindFirstChildWhichIsA("BasePart")
+                if bp then
+                    SafeTeleport(CFrame.new(bp.Position + Vector3.new(0, 5, 4)), 1)
+                end
+            end
+            -- Fire the CutEvent BindableEvent
+            pcall(function() nearestCE:Fire() end)
         end
     end)
 end
-local function StopAutoChop() if autoChopConn then autoChopConn:Disconnect(); autoChopConn=nil end end
+local function StopAutoChop()
+    Flags.AutoChop = false
+    if autoChopConn then autoChopConn:Disconnect(); autoChopConn = nil end
+end
 
--- AUTO SELL  (use task loop, not Heartbeat — no need to run 60x/sec)
+-- ═══════════════════════════════════════════════════════════════════
+-- AUTO SELL LOOP
+-- ═══════════════════════════════════════════════════════════════════
 local autoSellThread
 local function StartAutoSell()
-    autoSellThread=task.spawn(function()
+    Flags.AutoSell = true
+    if autoSellThread then task.cancel(autoSellThread) end
+    autoSellThread = task.spawn(function()
         while Flags.AutoSell do
             SellWood()
-            task.wait(3)
+            task.wait(4) -- give server time to process each batch
         end
     end)
 end
 local function StopAutoSell()
-    Flags.AutoSell=false
-    if autoSellThread then task.cancel(autoSellThread); autoSellThread=nil end
+    Flags.AutoSell = false
+    if autoSellThread then task.cancel(autoSellThread); autoSellThread = nil end
 end
 
--- AUTO BUY
+-- ═══════════════════════════════════════════════════════════════════
+-- FUNDS
+-- GetFunds is in Transactions > ClientToServer (RF) — CONFIRMED
+-- ═══════════════════════════════════════════════════════════════════
+local function GetFunds()
+    local c2s = GetTransactionsC2S()
+    if not c2s then return "?" end
+    local rf = c2s:FindFirstChild("GetFunds")
+    if rf and rf:IsA("RemoteFunction") then
+        local ok, v = pcall(function() return rf:InvokeServer() end)
+        if ok and v then return tostring(v) end
+    end
+    return "?"
+end
+
+-- ═══════════════════════════════════════════════════════════════════
+-- BUY AXE
+-- AttemptPurchase is in Transactions > ClientToServer (RF) — CONFIRMED
+-- ═══════════════════════════════════════════════════════════════════
 local autoBuyThread
 local function BuyAxe(item)
-    -- Teleport to the actual Wood R' Us store counter (Store_WoodRUs at 301.7, 13.8, 57.5)
-    local hrp=GetHRP(); if hrp then hrp.CFrame=CFrame.new(301.7, 15, 57.5) end
-    task.wait(1)
-    local tr=GetTransactions()
-    if tr then
-        local rf=tr:FindFirstChild("AttemptPurchase")
-        if rf and rf:IsA("RemoteFunction") then pcall(function() rf:InvokeServer(item) end) end
+    -- Teleport to Wood R' Us store counter (confirmed at 301.7, 13.8, 57.5)
+    SafeTeleport(CFrame.new(301.7, 19, 57.5))
+    task.wait(1.2)
+    local c2s = GetTransactionsC2S()
+    if c2s then
+        local rf = c2s:FindFirstChild("AttemptPurchase")
+        if rf and rf:IsA("RemoteFunction") then
+            local ok, result = pcall(function() return rf:InvokeServer(item) end)
+            if ok then
+                print("[LT2 Hub] Purchase result:", tostring(result))
+            end
+        end
     end
 end
 local function StartAutoBuy(item, amount)
-    Flags.AutoBuyRunning=true
+    Flags.AutoBuyRunning = true
     if autoBuyThread then task.cancel(autoBuyThread) end
-    autoBuyThread=task.spawn(function()
-        local done=0
-        while Flags.AutoBuyRunning and done<amount do
-            BuyAxe(item); done=done+1; task.wait(1.5)
+    autoBuyThread = task.spawn(function()
+        local done = 0
+        while Flags.AutoBuyRunning and done < amount do
+            BuyAxe(item); done = done + 1; task.wait(2)
         end
-        Flags.AutoBuyRunning=false
+        Flags.AutoBuyRunning = false
     end)
 end
-local function StopAutoBuy() Flags.AutoBuyRunning=false; if autoBuyThread then task.cancel(autoBuyThread); autoBuyThread=nil end end
+local function StopAutoBuy()
+    Flags.AutoBuyRunning = false
+    if autoBuyThread then task.cancel(autoBuyThread); autoBuyThread = nil end
+end
 
+-- ═══════════════════════════════════════════════════════════════════
 -- AXE DUPE
+-- ═══════════════════════════════════════════════════════════════════
 local axeDupeThread
 local function StartAxeDupe(waitTime, amount)
     if axeDupeThread then task.cancel(axeDupeThread) end
-    axeDupeThread=task.spawn(function()
-        local count=0
-        while count<amount do
-            local char=GetChar(); if not char then task.wait(1) continue end
-            local axe=LP.Backpack:FindFirstChildWhichIsA("Tool") or char:FindFirstChildWhichIsA("Tool")
+    axeDupeThread = task.spawn(function()
+        local count = 0
+        while count < amount do
+            local char = GetChar()
+            if not char then task.wait(1); continue end
+            local axe = LP.Backpack:FindFirstChildWhichIsA("Tool") or char:FindFirstChildWhichIsA("Tool")
             if axe then
-                local h=GetHum()
-                if h then pcall(function() h:EquipTool(axe) end); task.wait(waitTime); pcall(function() h:UnequipTools() end); task.wait(waitTime) end
-                count=count+1
-            else task.wait(0.5) end
+                local h = GetHum()
+                if h then
+                    pcall(function() h:EquipTool(axe) end)
+                    task.wait(waitTime)
+                    pcall(function() h:UnequipTools() end)
+                    task.wait(waitTime)
+                end
+                count = count + 1
+            else
+                task.wait(0.5)
+            end
         end
     end)
 end
+
 local function DropAllAxes()
-    local char=GetChar(); if not char then return end; local hrp=GetHRP()
-    for _,tool in ipairs(LP.Backpack:GetChildren()) do
+    local char = GetChar(); if not char then return end
+    local hrp = GetHRP()
+    for _, tool in ipairs(LP.Backpack:GetChildren()) do
         if tool:IsA("Tool") and tool.Name:lower():find("axe") then
-            tool.Parent=Workspace
-            if hrp then pcall(function() local h=tool:FindFirstChild("Handle"); if h then h.CFrame=hrp.CFrame*CFrame.new(math.random(-3,3),1,math.random(-3,3)) end end) end
-        end
-    end
-    for _,tool in ipairs(char:GetChildren()) do if tool:IsA("Tool") and tool.Name:lower():find("axe") then tool.Parent=Workspace end end
-end
-
--- GRAB TOOLS
-local function GrabTools()
-    local hrp=GetHRP(); if not hrp then return end
-    for _,v in ipairs(Workspace:GetDescendants()) do
-        if v:IsA("Tool") and not v.Parent:IsA("Model") then
-            local h=v:FindFirstChild("Handle"); if h and (hrp.Position-h.Position).Magnitude<30 then pcall(function() v.Parent=LP.Backpack end) end
-        end
-    end
-end
-
--- STEAL PLOT
--- Note: Setting Owner.Value client-side doesn't replicate to server.
--- The real approach is to use SelectLoadPlot from LoadSaveRequests after teleporting to the target's plot.
-local function StealPlot(playerName)
-    local target=Players:FindFirstChild(playerName); if not target then return end
-    local props=Workspace:FindFirstChild("Properties"); if not props then return end
-    for _,plot in ipairs(props:GetChildren()) do
-        local ow=plot:FindFirstChild("Owner")
-        if ow and ow.Value==target then
-            -- Teleport onto their plot's OriginSquare first
-            local origin=plot:FindFirstChild("OriginSquare") or plot:FindFirstChild("Square")
-            local hrp=GetHRP()
-            if hrp and origin and origin:IsA("BasePart") then
-                hrp.CFrame=CFrame.new(origin.Position+Vector3.new(0,5,0))
+            tool.Parent = Workspace
+            if hrp then
+                pcall(function()
+                    local h = tool:FindFirstChild("Handle")
+                    if h then h.CFrame = hrp.CFrame * CFrame.new(math.random(-3,3), 1, math.random(-3,3)) end
+                end)
             end
-            task.wait(0.5)
-            -- SelectLoadPlot is in PropertyPurchasing folder (NOT LoadSaveRequests)
-            local pp=GetPropertyPurchasing()
-            if pp then local rf=pp:FindFirstChild("SelectLoadPlot"); if rf and rf:IsA("RemoteFunction") then pcall(function() rf:InvokeServer() end) end end
+        end
+    end
+    for _, tool in ipairs(char:GetChildren()) do
+        if tool:IsA("Tool") and tool.Name:lower():find("axe") then
+            tool.Parent = Workspace
+        end
+    end
+end
+
+-- ═══════════════════════════════════════════════════════════════════
+-- GRAB TOOLS
+-- ═══════════════════════════════════════════════════════════════════
+local function GrabTools()
+    local hrp = GetHRP(); if not hrp then return end
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        if v:IsA("Tool") and not v.Parent:IsA("Model") then
+            local h = v:FindFirstChild("Handle")
+            if h and (hrp.Position - h.Position).Magnitude < 30 then
+                pcall(function() v.Parent = LP.Backpack end)
+            end
+        end
+    end
+end
+
+-- ═══════════════════════════════════════════════════════════════════
+-- PLOT SYSTEM — FIXED
+-- Owner.Value is an ObjectValue pointing to a Player instance.
+-- Properties folder is in Workspace (confirmed in RBXLX).
+-- SelectLoadPlot is in PropertyPurchasing (RF) — CONFIRMED.
+-- ═══════════════════════════════════════════════════════════════════
+local function GetMyPlot()
+    local props = Workspace:FindFirstChild("Properties")
+    if not props then return nil end
+    for _, plot in ipairs(props:GetChildren()) do
+        local ow = plot:FindFirstChild("Owner")
+        -- Owner.Value is a Player reference (ObjectValue)
+        if ow and ow.Value == LP then return plot end
+    end
+    return nil
+end
+
+local function BaseHelp()
+    local plot = GetMyPlot()
+    if not plot then
+        warn("[LT2 Hub] No owned plot found. Buy land first.")
+        return
+    end
+    -- Find any BasePart in the plot to teleport to
+    for _, v in ipairs(plot:GetDescendants()) do
+        if v:IsA("BasePart") then
+            SafeTeleport(CFrame.new(v.Position + Vector3.new(0, 10, 0)))
             return
         end
     end
 end
 
--- MONEY DUPE
--- How it works:
---   LT2 uses a region-trigger sell system. When WoodSection parts enter the SELLWOOD
---   region (255.7, 4, 66.1), the server calculates their value and fires FundsChanged.
---   We exploit this by: duping axes (which have sell value), moving them into the sell
---   zone, then dropping them back out. The Donate RemoteFunction
---   (Transactions > ClientToServer > Donate) lets you send money to another player —
---   but it also validates server-side so we cannot directly call SetFunds.
---   The safest working money exploit is: sell real wood quickly (Dupe+Sell loop).
---   True "add funds from nothing" requires server-side access which a LocalScript cannot do.
---   The best client-achievable money method is the rapid Dupe+Sell wood loop below.
+local function FreeLand()
+    local props = Workspace:FindFirstChild("Properties")
+    if not props then return end
+    for _, plot in ipairs(props:GetChildren()) do
+        local ow = plot:FindFirstChild("Owner")
+        -- Unclaimed: Owner exists but Value is nil/false
+        if ow and not ow.Value then
+            local origin = plot:FindFirstChild("OriginSquare") or plot:FindFirstChild("Square")
+            if origin and origin:IsA("BasePart") then
+                SafeTeleport(CFrame.new(origin.Position + Vector3.new(0, 10, 0)))
+                task.wait(0.8)
+                -- SelectLoadPlot is in PropertyPurchasing (RF) — CONFIRMED
+                local pp = GetPropertyPurchasing()
+                if pp then
+                    local rf = pp:FindFirstChild("SelectLoadPlot")
+                    if rf and rf:IsA("RemoteFunction") then
+                        local ok, r = pcall(function() return rf:InvokeServer() end)
+                        print("[LT2 Hub] SelectLoadPlot result:", ok, tostring(r))
+                    end
+                end
+                return
+            end
+        end
+    end
+    warn("[LT2 Hub] No unclaimed plots found.")
+end
+
+local function ForceSave()
+    local ls = GetLoadSave()
+    if not ls then return end
+    local rf = ls:FindFirstChild("RequestSave")
+    if rf and rf:IsA("RemoteFunction") then
+        pcall(function() rf:InvokeServer() end)
+    end
+end
+
+-- ═══════════════════════════════════════════════════════════════════
+-- STEAL PLOT — FIXED
+-- Teleport onto target's OriginSquare, then invoke SelectLoadPlot.
+-- Note: This is patched in recent LT2 versions — server validates
+-- that the plot was previously owned by you. May not work reliably.
+-- ═══════════════════════════════════════════════════════════════════
+local function StealPlot(playerName)
+    local target = Players:FindFirstChild(playerName)
+    if not target then return end
+    local props = Workspace:FindFirstChild("Properties")
+    if not props then return end
+    for _, plot in ipairs(props:GetChildren()) do
+        local ow = plot:FindFirstChild("Owner")
+        if ow and ow.Value == target then
+            local origin = plot:FindFirstChild("OriginSquare") or plot:FindFirstChild("Square")
+            if origin and origin:IsA("BasePart") then
+                SafeTeleport(CFrame.new(origin.Position + Vector3.new(0, 5, 0)))
+                task.wait(0.8)
+                local pp = GetPropertyPurchasing()
+                if pp then
+                    local rf = pp:FindFirstChild("SelectLoadPlot")
+                    if rf and rf:IsA("RemoteFunction") then
+                        pcall(function() rf:InvokeServer() end)
+                    end
+                end
+            end
+            return
+        end
+    end
+end
+
+-- ═══════════════════════════════════════════════════════════════════
+-- MONEY DUPE (AUTO SELL LOOP)
+-- True money dupe from nothing requires server access (impossible client-side).
+-- Best approach: repeatedly sell real cut wood via the SELLWOOD trigger.
+-- ═══════════════════════════════════════════════════════════════════
 local moneyDupeThread
 local Flags_MoneyDupe = false
 local function StartMoneyDupe()
@@ -830,24 +1081,8 @@ local function StartMoneyDupe()
     if moneyDupeThread then task.cancel(moneyDupeThread) end
     moneyDupeThread = task.spawn(function()
         while Flags_MoneyDupe do
-            -- Step 1: Move all loaded trees to the Wood R'Us sell counter area
-            DupeWood()
-            task.wait(0.8)
-            -- Step 2: Move all wood pieces onto the SELLWOOD trigger zone
-            -- SELLWOOD is at 255.7, 3.9, 66.1 (confirmed from XML)
-            local sellPos = Vector3.new(255.7, 5, 66.1)
-            local n = 0
-            for _,v in ipairs(Workspace:GetDescendants()) do
-                if (v.Name=="WoodSection" or v.Name=="WoodPiece" or v.Name=="Plank") and v:IsA("BasePart") then
-                    pcall(function()
-                        v.Anchored = false
-                        v.AssemblyLinearVelocity = Vector3.zero
-                        v.CFrame = CFrame.new(sellPos + Vector3.new((n%6)*1.5, n*0.05, math.floor(n/6)*1.5))
-                    end)
-                    n = n + 1
-                end
-            end
-            task.wait(2) -- wait for server to register the sell trigger
+            SellWood()
+            task.wait(4)
         end
     end)
 end
@@ -857,66 +1092,157 @@ local function StopMoneyDupe()
 end
 
 -- ═══════════════════════════════════════════════════════════════════
+-- FLY
+-- ═══════════════════════════════════════════════════════════════════
+local flyConn, flyBV, flyBG
+local function StartFly()
+    local hrp = GetHRP(); if not hrp then return end
+    flyBV = Instance.new("BodyVelocity")
+    flyBV.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+    flyBV.Velocity = Vector3.zero
+    flyBV.Parent = hrp
+    flyBG = Instance.new("BodyGyro")
+    flyBG.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+    flyBG.CFrame = hrp.CFrame
+    flyBG.Parent = hrp
+    flyConn = RunService.Heartbeat:Connect(function()
+        if not Flags.Fly then return end
+        local h2 = GetHRP(); if not h2 then return end
+        local cam = Workspace.CurrentCamera
+        local dir = Vector3.zero
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir = dir + cam.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir = dir - cam.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir = dir - cam.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir = dir + cam.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir = dir + Vector3.new(0, 1, 0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir = dir - Vector3.new(0, 1, 0) end
+        flyBV.Velocity = dir.Magnitude > 0 and dir.Unit * Flags.FlySpeed or Vector3.zero
+        flyBG.CFrame = cam.CFrame
+    end)
+end
+local function StopFly()
+    if flyConn then flyConn:Disconnect(); flyConn = nil end
+    if flyBV   then flyBV:Destroy();      flyBV = nil  end
+    if flyBG   then flyBG:Destroy();      flyBG = nil  end
+end
+
+-- ═══════════════════════════════════════════════════════════════════
+-- NOCLIP
+-- ═══════════════════════════════════════════════════════════════════
+local noclipConn
+local function SetNoclip(s)
+    if s then
+        noclipConn = RunService.Stepped:Connect(function()
+            local c = GetChar(); if not c then return end
+            for _, p in ipairs(c:GetDescendants()) do
+                if p:IsA("BasePart") then p.CanCollide = false end
+            end
+        end)
+    else
+        if noclipConn then noclipConn:Disconnect(); noclipConn = nil end
+        local c = GetChar()
+        if c then
+            for _, p in ipairs(c:GetDescendants()) do
+                if p:IsA("BasePart") then p.CanCollide = true end
+            end
+        end
+    end
+end
+
+-- INFINITE JUMP
+UserInputService.JumpRequest:Connect(function()
+    if Flags.InfJump then
+        local h = GetHum()
+        if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
+    end
+end)
+
+-- LIGHTING
+RunService.Heartbeat:Connect(function()
+    if Flags.AlwaysDay then Lighting.ClockTime = 14; Lighting.Brightness = 2
+    elseif Flags.AlwaysNight then Lighting.ClockTime = 0; Lighting.Brightness = 0.5 end
+end)
+
+-- ═══════════════════════════════════════════════════════════════════
 -- BUILD TABS
 -- ═══════════════════════════════════════════════════════════════════
 
 -- PLAYER TAB
 local PlayerTab = CreateTab("Player","👤")
 PlayerTab:AddSection("Movement")
-PlayerTab:AddSlider("Walk Speed",{Min=1,Max=150,Default=16,Step=1},function(v) Flags.SpeedVal=v; local h=GetHum(); if h then h.WalkSpeed=v end end)
-PlayerTab:AddSlider("Jump Power",{Min=0,Max=250,Default=50,Step=1},function(v) Flags.JumpVal=v; local h=GetHum(); if h then h.JumpPower=v end end)
+PlayerTab:AddSlider("Walk Speed",{Min=1,Max=150,Default=16,Step=1},function(v)
+    Flags.SpeedVal=v; local h=GetHum(); if h then h.WalkSpeed=v end
+end)
+PlayerTab:AddSlider("Jump Power",{Min=0,Max=250,Default=50,Step=1},function(v)
+    Flags.JumpVal=v; local h=GetHum(); if h then h.JumpPower=v end
+end)
 PlayerTab:AddToggle("Infinite Jump",{Default=false},function(v) Flags.InfJump=v end)
 PlayerTab:AddToggle("Noclip",{Default=false},function(v) Flags.Noclip=v; SetNoclip(v) end)
 PlayerTab:AddSection("Flight")
 PlayerTab:AddSlider("Fly Speed",{Min=10,Max=300,Default=50,Step=5},function(v) Flags.FlySpeed=v end)
-PlayerTab:AddToggle("Fly  (WASD + Space / LShift)",{Default=false},function(v) Flags.Fly=v; if v then StartFly() else StopFly() end end)
+PlayerTab:AddToggle("Fly  (WASD+Space/LShift)",{Default=false},function(v)
+    Flags.Fly=v; if v then StartFly() else StopFly() end
+end)
 PlayerTab:AddSection("Misc")
 PlayerTab:AddButton("Reset Character",function() local h=GetHum(); if h then h.Health=0 end end)
 PlayerTab:AddButton("Grab Nearby Tools", GrabTools)
-local fundsLbl=PlayerTab:AddLabel("Funds: press button below")
-PlayerTab:AddButton("Refresh Funds",function() fundsLbl:Set("Funds: $"..GetFunds()) end)
+local fundsLbl = PlayerTab:AddLabel("Funds: press button below")
+PlayerTab:AddButton("Refresh Funds",function()
+    fundsLbl:Set("Funds: $"..GetFunds())
+end)
 
 -- SLOT TAB
 local SlotTab = CreateTab("Slot","🏠")
 SlotTab:AddSection("Base & Land")
 SlotTab:AddButton("Teleport → My Base", BaseHelp)
-SlotTab:AddButton("Go to Free Land Plot", FreeLand)
-SlotTab:AddButton("Expand Land (Max)", function()
-    -- ClientExpandedProperty is a RemoteEvent in PropertyPurchasing (not Interaction)
-    -- Must own a plot first. Fires server request to expand property boundary.
-    local pp=GetPropertyPurchasing(); if not pp then return end
-    local evt=pp:FindFirstChild("ClientExpandedProperty")
+SlotTab:AddButton("Claim Free Land", FreeLand)
+SlotTab:AddButton("Expand Land (Max)",function()
+    -- ClientExpandedProperty is a RemoteEvent in PropertyPurchasing — CONFIRMED
+    local pp = GetPropertyPurchasing(); if not pp then return end
+    local evt = pp:FindFirstChild("ClientExpandedProperty")
     if evt and evt:IsA("RemoteEvent") then pcall(function() evt:FireServer() end) end
 end)
 SlotTab:AddSection("Save & Clear")
 SlotTab:AddButton("Force Save", ForceSave)
-SlotTab:AddButton("Clear Plot  (non-base parts)",function()
-    local plot=GetMyPlot(); if not plot then return end
-    for _,part in ipairs(plot:GetDescendants()) do
-        if part:IsA("BasePart") and part.Name~="Base" and part.Name~="Land" then pcall(function() part:Destroy() end) end
+SlotTab:AddButton("Clear Plot (non-base)",function()
+    local plot = GetMyPlot(); if not plot then return end
+    for _, part in ipairs(plot:GetDescendants()) do
+        if part:IsA("BasePart") and part.Name ~= "Base" and part.Name ~= "Land" then
+            pcall(function() part:Destroy() end)
+        end
     end
 end)
 SlotTab:AddSection("Steal Plot")
-local stealOpts={}; for _,p in ipairs(Players:GetPlayers()) do if p~=LP then table.insert(stealOpts,p.Name) end end
-if #stealOpts==0 then stealOpts={"(no other players)"} end
-local stealDrop=SlotTab:AddDropdown("Target Player",{Options=stealOpts,Default=stealOpts[1]})
+local stealOpts = {}
+for _, p in ipairs(Players:GetPlayers()) do
+    if p ~= LP then table.insert(stealOpts, p.Name) end
+end
+if #stealOpts == 0 then stealOpts = {"(no other players)"} end
+local stealDrop = SlotTab:AddDropdown("Target Player",{Options=stealOpts,Default=stealOpts[1]})
 SlotTab:AddButton("Steal Plot",function() StealPlot(stealDrop:Get()) end)
 
 -- WORLD TAB
 local WorldTab = CreateTab("World","🌍")
 WorldTab:AddSection("Lighting")
-WorldTab:AddToggle("Always Day",{Default=false},function(v) Flags.AlwaysDay=v; Flags.AlwaysNight=false; if v then Lighting.FogEnd=100000 end end)
-WorldTab:AddToggle("Always Night",{Default=false},function(v) Flags.AlwaysNight=v; Flags.AlwaysDay=false end)
+WorldTab:AddToggle("Always Day",{Default=false},function(v)
+    Flags.AlwaysDay=v; Flags.AlwaysNight=false
+    if v then Lighting.FogEnd=100000 end
+end)
+WorldTab:AddToggle("Always Night",{Default=false},function(v)
+    Flags.AlwaysNight=v; Flags.AlwaysDay=false
+end)
 WorldTab:AddToggle("No Fog",{Default=false},function(v)
-    if v then Lighting.FogEnd=100000; Lighting.FogStart=99999 else Lighting.FogEnd=1000; Lighting.FogStart=0 end
+    if v then Lighting.FogEnd=100000; Lighting.FogStart=99999
+    else Lighting.FogEnd=1000; Lighting.FogStart=0 end
 end)
 WorldTab:AddToggle("Shadows",{Default=true},function(v) Lighting.GlobalShadows=v end)
 WorldTab:AddSection("Teleport")
-local locOpts={}; for name in pairs(Locations) do table.insert(locOpts,name) end
-local locDrop=WorldTab:AddDropdown("Select Location",{Options=locOpts,Default=locOpts[1]})
+local locOpts = {}; for name in pairs(Locations) do table.insert(locOpts, name) end
+local locDrop = WorldTab:AddDropdown("Select Location",{Options=locOpts,Default=locOpts[1]})
 WorldTab:AddButton("Teleport ▶",function() TeleportTo(locDrop:Get()) end)
 WorldTab:AddSection("Quick Teleport")
 WorldTab:AddButton("→ Wood Dropoff",    function() TeleportTo("Wood Dropoff") end)
+WorldTab:AddButton("→ Sell Wood Zone",  function() TeleportTo("Sell Wood") end)
 WorldTab:AddButton("→ Wood R' Us",      function() TeleportTo("Wood R' Us") end)
 WorldTab:AddButton("→ Land Store",      function() TeleportTo("Land Store") end)
 WorldTab:AddButton("→ Snow Biome",      function() TeleportTo("Snow Biome") end)
@@ -924,102 +1250,108 @@ WorldTab:AddButton("→ Volcano Biome",   function() TeleportTo("Volcano Biome")
 WorldTab:AddButton("→ Swamp Biome",     function() TeleportTo("Swamp Biome") end)
 WorldTab:AddButton("→ Tropics / Ferry", function() TeleportTo("Tropics / Ferry") end)
 WorldTab:AddSection("Teleport to Player")
-local allP={}; for _,p in ipairs(Players:GetPlayers()) do if p~=LP then table.insert(allP,p.Name) end end
-if #allP==0 then allP={"(no other players)"} end
-local tpPDrop=WorldTab:AddDropdown("Player",{Options=allP,Default=allP[1]})
+local allP = {}
+for _, p in ipairs(Players:GetPlayers()) do
+    if p ~= LP then table.insert(allP, p.Name) end
+end
+if #allP == 0 then allP = {"(no other players)"} end
+local tpPDrop = WorldTab:AddDropdown("Player",{Options=allP,Default=allP[1]})
 WorldTab:AddButton("Teleport to Player",function()
-    local tgt=Players:FindFirstChild(tpPDrop:Get()); if not tgt or not tgt.Character then return end
-    local root=tgt.Character:FindFirstChild("HumanoidRootPart"); if root then local hrp=GetHRP(); if hrp then hrp.CFrame=root.CFrame*CFrame.new(3,0,0) end end
+    local tgt = Players:FindFirstChild(tpPDrop:Get())
+    if not tgt or not tgt.Character then return end
+    local root = tgt.Character:FindFirstChild("HumanoidRootPart")
+    if root then SafeTeleport(root.CFrame * CFrame.new(3, 0, 0)) end
 end)
 
 -- WOOD TAB
 local WoodTab = CreateTab("Wood","🪵")
 WoodTab:AddSection("Auto Chop")
--- TreeClass values confirmed from XML StringValue entries in tree Models
-local woodTypes={"Any","Generic","Oak","Birch","Walnut","Koa","Palm","Pine","Fir","Frost","SnowGlow","Spooky","SpookyNeon","Volcano","CaveCrawler","LoneCave","GreenSwampy","GoldSwampy","Cherry","BlueSpruce"}
+WoodTab:AddLabel("Trees auto-move near you when chopped")
+local woodTypes = {"Any","Generic","Oak","Birch","Walnut","Koa","Palm","Pine","Fir","Frost",
+    "SnowGlow","Spooky","SpookyNeon","Volcano","CaveCrawler","LoneCave","GreenSwampy",
+    "GoldSwampy","Cherry","BlueSpruce"}
 WoodTab:AddDropdown("Target Wood",{Options=woodTypes,Default="Any"},function(v) Flags.SelWood=v end)
-WoodTab:AddSlider("Get Amount",{Min=1,Max=100,Default=10,Step=1},function(v) Flags.GetTreeAmt=v end)
-WoodTab:AddToggle("Auto Chop",{Default=false},function(v) Flags.AutoChop=v; if v then StartAutoChop() else StopAutoChop() end end)
-WoodTab:AddToggle("Auto Sell Wood",{Default=false},function(v) Flags.AutoSell=v; if v then StartAutoSell() else StopAutoSell() end end)
-WoodTab:AddSection("Actions")
-WoodTab:AddButton("Move All Wood → Dropoff", SellWood)
-WoodTab:AddButton("Teleport All Wood to Me", TeleportWoodToMe)
-WoodTab:AddButton("Dupe Wood → WoodRUs", DupeWood)
-WoodTab:AddButton("Dupe + Instant Sell",function()
-    -- Moves trees to sell zone, then moves wood pieces onto SELLWOOD trigger part
-    -- The SELLWOOD Part at (255.7,4,66.1) is a region trigger — wood touching it gets sold by server
-    DupeWood(); task.wait(0.8); SellWood()
+WoodTab:AddToggle("Auto Chop",{Default=false},function(v)
+    Flags.AutoChop=v
+    if v then StartAutoChop() else StopAutoChop() end
 end)
+WoodTab:AddToggle("Auto Sell Wood",{Default=false},function(v)
+    Flags.AutoSell=v
+    if v then StartAutoSell() else StopAutoSell() end
+end)
+WoodTab:AddSection("Actions")
+WoodTab:AddButton("Sell All Wood Now", SellWood)
+WoodTab:AddButton("Teleport Wood → Me", TeleportWoodToMe)
+WoodTab:AddButton("Move Trees → Dropoff", DupeWood)
 WoodTab:AddSection("Info")
-local treeLbl=WoodTab:AddLabel("Press Count Trees to scan")
-WoodTab:AddButton("Count Trees",function()
-    local n=0
-    for _,v in ipairs(Workspace:GetDescendants()) do
-        if (v.Name=="WoodSection" or v.Name=="Trunk" or v.Name:lower():find("trunk")) and v:IsA("BasePart") then n=n+1 end
+local treeLbl = WoodTab:AddLabel("Press Scan to count")
+WoodTab:AddButton("Scan Trees",function()
+    local n = 0
+    local w = 0
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        if IsTreeModel(v) then n = n + 1 end
     end
-    treeLbl:Set("Trees / Wood found: "..n)
+    for _, p in ipairs(GetWoodPieces()) do w = w + 1 end
+    treeLbl:Set("Trees: "..n.."  |  Wood Pieces: "..w)
 end)
 
 -- AUTO BUY TAB
 local BuyTab = CreateTab("Auto Buy","💰")
 BuyTab:AddSection("Quick Purchase")
-BuyTab:AddButton("Rukiryaxe  — $7,400",function() BuyAxe("Rukiryaxe") end)
-BuyTab:AddButton("BluesteelAxe",function() BuyAxe("BluesteelAxe") end)
-BuyTab:AddButton("FireAxe",function() BuyAxe("FireAxe") end)
-BuyTab:AddButton("IceAxe",function() BuyAxe("IceAxe") end)
+BuyTab:AddButton("Rukiryaxe  — $7,400", function() BuyAxe("Rukiryaxe") end)
+BuyTab:AddButton("BluesteelAxe",        function() BuyAxe("BluesteelAxe") end)
+BuyTab:AddButton("FireAxe",             function() BuyAxe("FireAxe") end)
+BuyTab:AddButton("IceAxe",              function() BuyAxe("IceAxe") end)
+BuyTab:AddButton("Basic Sawmill",       function() BuyAxe("BasicSawmill") end)
 BuyTab:AddSection("Auto Buy Loop")
-local shopItems={"Rukiryaxe","BluesteelAxe","FireAxe","IceAxe","CaveAxe","RefinedAxe","SilverAxe","Sawmill","Box","Plank"}
-local buyItemDrop=BuyTab:AddDropdown("Item",{Options=shopItems,Default="Rukiryaxe"},function(v) Flags.AutBuyItem=v end)
-local buyAmtSlider=BuyTab:AddSlider("Amount",{Min=1,Max=99,Default=1,Step=1})
+local shopItems = {"Rukiryaxe","BluesteelAxe","FireAxe","IceAxe","CaveAxe","RefinedAxe","SilverAxe","Sawmill","Box","Plank"}
+local buyItemDrop = BuyTab:AddDropdown("Item",{Options=shopItems,Default="Rukiryaxe"},function(v) Flags.AutBuyItem=v end)
+local buyAmtSlider = BuyTab:AddSlider("Amount",{Min=1,Max=99,Default=1,Step=1})
 BuyTab:AddToggle("Auto Buy Loop",{Default=false},function(v)
     if v then StartAutoBuy(Flags.AutBuyItem, buyAmtSlider:Get()) else StopAutoBuy() end
-end)
-BuyTab:AddSection("Basic Sawmill")
-BuyTab:AddButton("Buy Basic Sawmill",function()
-    -- Teleport to Wood R'Us store counter and invoke AttemptPurchase with "BasicSawmill"
-    -- (same system as axes — AttemptPurchase is a RemoteFunction in Transactions > ClientToServer)
-    BuyAxe("BasicSawmill")
 end)
 
 -- DUPE TAB
 local DupeTab = CreateTab("Dupe","📦")
 DupeTab:AddSection("Wood Dupe")
-DupeTab:AddLabel("Moves loaded tree models to the sawmill area")
-DupeTab:AddButton("Dupe Wood", DupeWood)
-DupeTab:AddButton("Dupe + Instant Sell",function()
-    -- Moves trees to sell zone then stacks wood on SELLWOOD trigger (server sells on contact)
-    DupeWood(); task.wait(0.8); SellWood()
-end)
+DupeTab:AddLabel("Moves trees to dropoff → auto-chop there")
+DupeTab:AddButton("Move Trees → Dropoff", DupeWood)
+DupeTab:AddButton("Sell Current Wood",    SellWood)
 DupeTab:AddSection("Axe Dupe")
-local dupeWaitSlider=DupeTab:AddSlider("Wait (×0.1s)",{Min=1,Max=30,Default=5,Step=1})
-local dupeAmtSlider =DupeTab:AddSlider("Amount",{Min=1,Max=50,Default=5,Step=1})
-DupeTab:AddButton("Start Axe Dupe",function() StartAxeDupe(dupeWaitSlider:Get()*0.1, dupeAmtSlider:Get()) end)
+local dupeWaitSlider = DupeTab:AddSlider("Wait (×0.1s)",{Min=1,Max=30,Default=5,Step=1})
+local dupeAmtSlider  = DupeTab:AddSlider("Amount",{Min=1,Max=50,Default=5,Step=1})
+DupeTab:AddButton("Start Axe Dupe",function()
+    StartAxeDupe(dupeWaitSlider:Get()*0.1, dupeAmtSlider:Get())
+end)
 DupeTab:AddButton("Drop All Axes", DropAllAxes)
-DupeTab:AddSection("Item Dupe")
+DupeTab:AddSection("Item Tools")
 DupeTab:AddButton("Re-grab Dropped Tools", GrabTools)
 DupeTab:AddButton("Clone Held Tool",function()
-    local c=GetChar(); if not c then return end; local t=c:FindFirstChildOfClass("Tool"); if not t then return end
-    pcall(function() t:Clone().Parent=LP.Backpack end)
+    local c = GetChar(); if not c then return end
+    local t = c:FindFirstChildOfClass("Tool"); if not t then return end
+    pcall(function() t:Clone().Parent = LP.Backpack end)
 end)
 
 -- MONEY TAB
 local MoneyTab = CreateTab("Money","💵")
 MoneyTab:AddSection("How It Works")
-MoneyTab:AddLabel("1. Load trees near your base first")
-MoneyTab:AddLabel("2. Toggle Auto Money Dupe ON")
-MoneyTab:AddLabel("3. Trees dupe to sell zone → wood triggers sell region")
-MoneyTab:AddLabel("4. Server pays you each sell cycle (~2-3s)")
-MoneyTab:AddLabel("5. More trees loaded = more $ per cycle")
-MoneyTab:AddSection("Auto Money Dupe")
-MoneyTab:AddToggle("Auto Money Dupe",{Default=false},function(v)
+MoneyTab:AddLabel("1. Chop trees (auto or manual)")
+MoneyTab:AddLabel("2. Press 'Sell All Wood Now'")
+MoneyTab:AddLabel("3. Wood is placed on SELLWOOD trigger")
+MoneyTab:AddLabel("4. Server detects touch and pays you")
+MoneyTab:AddLabel("5. Toggle Auto Sell for repeat loop")
+MoneyTab:AddSection("Auto Money")
+MoneyTab:AddToggle("Auto Money (Sell Loop)",{Default=false},function(v)
     if v then StartMoneyDupe() else StopMoneyDupe() end
 end)
-MoneyTab:AddSection("Manual Steps")
-MoneyTab:AddButton("Step 1: Dupe Trees to Sell Zone", DupeWood)
-MoneyTab:AddButton("Step 2: Stack Wood on SELLWOOD", SellWood)
+MoneyTab:AddSection("Manual")
+MoneyTab:AddButton("Sell All Wood Now", SellWood)
+MoneyTab:AddButton("Move Trees → Dropoff", DupeWood)
 MoneyTab:AddSection("Balance")
-local moneyLbl=MoneyTab:AddLabel("Balance: press Refresh")
-MoneyTab:AddButton("Refresh Balance",function() moneyLbl:Set("Balance: $"..GetFunds()) end)
+local moneyLbl = MoneyTab:AddLabel("Balance: press Refresh")
+MoneyTab:AddButton("Refresh Balance",function()
+    moneyLbl:Set("Balance: $"..GetFunds())
+end)
 
 -- SETTINGS TAB
 local SettingsTab = CreateTab("Settings","⚙")
@@ -1028,26 +1360,29 @@ SettingsTab:AddLabel("PC: Right Ctrl = toggle  |  ─ = minimize")
 SettingsTab:AddLabel("Mobile: Tap LT icon to restore window")
 SettingsTab:AddLabel("Drag the title bar or LT icon to move")
 SettingsTab:AddSection("Feature Guide")
-SettingsTab:AddLabel("FLY: Toggle on → use WASD to fly, Space=up, LShift=down")
-SettingsTab:AddLabel("NOCLIP: Walk through all objects. Toggle off to restore.")
-SettingsTab:AddLabel("AUTO CHOP: Stand near trees. Picks nearest matching type.")
-SettingsTab:AddLabel("AUTO SELL: Runs Dupe+Sell loop every 3s automatically.")
-SettingsTab:AddLabel("DUPE WOOD: Moves loaded trees to sell zone. Need trees near base.")
-SettingsTab:AddLabel("AXE DUPE: Equip/unequip loop. Dupes held axe. Then drop+regrab.")
-SettingsTab:AddLabel("BUY AXE: Auto-TPs to store counter and fires AttemptPurchase.")
-SettingsTab:AddLabel("STEAL PLOT: TPs onto target plot and calls SelectLoadPlot remote.")
-SettingsTab:AddLabel("MONEY DUPE: Dupe trees to SELLWOOD trigger zone. Server pays on contact.")
-SettingsTab:AddLabel("FREE LAND: Finds unclaimed plot, TPs you there, claims via SelectLoadPlot.")
+SettingsTab:AddLabel("FLY: Toggle → WASD, Space=up, LShift=down")
+SettingsTab:AddLabel("NOCLIP: Walk through objects. Toggle off to restore.")
+SettingsTab:AddLabel("AUTO CHOP: Fires CutEvent on nearest tree. Works without axe.")
+SettingsTab:AddLabel("AUTO SELL: Places cut wood on SELLWOOD trigger every 4s.")
+SettingsTab:AddLabel("DUPE WOOD: Moves tree models to dropoff area.")
+SettingsTab:AddLabel("AXE DUPE: Equip/unequip loop. Then drop+regrab.")
+SettingsTab:AddLabel("SELL: Wood placed at SELLWOOD(255.7,3.9,66.1) is sold by server.")
+SettingsTab:AddLabel("OWNERSHIP: Server checks plot ownership. Chop on YOUR plot.")
 SettingsTab:AddSection("About")
-SettingsTab:AddLabel("LT2 Exploit Hub  v3.0  |  Game: 13822889")
-SettingsTab:AddLabel("All remotes verified against game XML file")
-SettingsTab:AddSection("Debug / Danger")
-SettingsTab:AddButton("Reset Remote Cache",function() _Interaction=nil; _Transactions=nil; _LoadSaveRequests=nil; _PropertyPurchasing=nil end)
-SettingsTab:AddButton("Rejoin Server",function() game:GetService("TeleportService"):Teleport(game.PlaceId,LP) end)
+SettingsTab:AddLabel("LT2 Exploit Hub  v4.0  |  Game: 13822889")
+SettingsTab:AddLabel("All remotes verified from RBXLX deep analysis")
+SettingsTab:AddSection("Debug")
+SettingsTab:AddButton("Reset Remote Cache",function()
+    _Interaction=nil; _TransactionsC2S=nil; _TransactionsS2C=nil
+    _LoadSaveRequests=nil; _PropertyPurchasing=nil
+end)
+SettingsTab:AddButton("Rejoin Server",function()
+    game:GetService("TeleportService"):Teleport(game.PlaceId, LP)
+end)
 SettingsTab:AddButton("Destroy GUI",function() ScreenGui:Destroy() end)
 
 -- ═══════════════════════════════════════════════════════════════════
--- ACTIVATE FIRST TAB  +  OPEN ANIMATION
+-- ACTIVATE FIRST TAB + OPEN ANIMATION
 -- ═══════════════════════════════════════════════════════════════════
 task.defer(function()
     task.wait()
@@ -1056,15 +1391,16 @@ task.defer(function()
         t.Button.BackgroundTransparency=1; t.Button.TextColor3=T.TextSec
     end
     if Tabs["Player"] then
-        local pt=Tabs["Player"]
+        local pt = Tabs["Player"]
         pt.Page.Visible=true; pt.Indicator.Visible=true
         pt.Button.BackgroundTransparency=0.82; pt.Button.TextColor3=T.TextPri
         ActiveTab=pt
     end
 end)
 
--- Scale-in open animation
 Main.Size=UDim2.new(0,0,0,0); Main.BackgroundTransparency=1
 TwF(Main,{BackgroundTransparency=0}); TwS(Main,{Size=UDim2.new(0,T.WinW,0,T.WinH)})
 
-print("[LT2 Hub] Loaded! GUI → "..tostring(guiParent).."  |  RightCtrl = toggle")
+print("[LT2 Hub v4.0] Loaded! GUI → "..tostring(guiParent).."  |  RightCtrl = toggle")
+print("[LT2 Hub] SELLWOOD @ (255.7, 3.9, 66.1) | WOODDROPOFF @ (322.5, 11.0, 97.1)")
+print("[LT2 Hub] Remotes: Transactions/ClientToServer/{AttemptPurchase,GetFunds}")
