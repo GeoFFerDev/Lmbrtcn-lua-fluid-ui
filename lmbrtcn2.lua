@@ -6,7 +6,7 @@
      ███████╗    ██║   ███████╗     ███████╗██╔╝ ██╗██║     ███████╗╚██████╔╝██║   ██║
      ╚══════╝    ╚═╝   ╚══════╝     ╚══════╝╚═╝  ╚═╝╚═╝     ╚══════╝ ╚═════╝ ╚═╝   ╚═╝
 
-    Lumber Tycoon 2  |  FULLY FIXED v8.0  |  Toggle: RightCtrl  |  Mobile: tap floating icon
+    Lumber Tycoon 2  |  FULLY FIXED v7.0  |  Toggle: RightCtrl  |  Mobile: tap floating icon
 
     ── KEY FIXES (from deep RBXLX analysis) ──────────────────────────────────────────────
     1. SELLING:   Wood sell uses SELLWOOD part at (255.7, 3.9, 66.1) — a thin 0.2×1.8×5.4
@@ -187,7 +187,7 @@ New("Frame", {Size=UDim2.new(1,0,0,1), Position=UDim2.new(0,0,1,-1), BackgroundC
 local dot = New("Frame", {Size=UDim2.new(0,7,0,7), Position=UDim2.new(0,12,0.5,-3), BackgroundColor3=T.Accent, BorderSizePixel=0, ZIndex=7, Parent=TBar})
 Corner(dot, UDim.new(1,0))
 New("TextLabel", {Text="LT2 Exploit", Size=UDim2.new(0,120,1,0), Position=UDim2.new(0,26,0,0), BackgroundTransparency=1, Font=Enum.Font.GothamBold, TextSize=14, TextColor3=T.TextPri, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7, Parent=TBar})
-New("TextLabel", {Text="Fixed v4.0  •  #13822889", Size=UDim2.new(0,200,1,0), Position=UDim2.new(0,152,0,0), BackgroundTransparency=1, Font=Enum.Font.Gotham, TextSize=10, TextColor3=T.Accent, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7, Parent=TBar})
+New("TextLabel", {Text="Fixed v5.0  •  #13822889", Size=UDim2.new(0,200,1,0), Position=UDim2.new(0,152,0,0), BackgroundTransparency=1, Font=Enum.Font.Gotham, TextSize=10, TextColor3=T.Accent, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7, Parent=TBar})
 MakeDraggable(TBar, Main)
 
 local CloseBtn = New("TextButton", {Text="✕", Size=UDim2.new(0,28,0,28), Position=UDim2.new(1,-34,0.5,-14), BackgroundColor3=Color3.fromRGB(185,55,55), BackgroundTransparency=0.35, Font=Enum.Font.GothamBold, TextSize=12, TextColor3=T.TextPri, BorderSizePixel=0, ZIndex=8, Parent=TBar})
@@ -665,29 +665,34 @@ local function GetTreeClass(model)
     return "Generic"
 end
 
--- Get all wood BaseParts (pieces on the map, not inside tree models)
--- These are the cut/processed wood pieces that can be sold.
--- After cutting, WoodSection parts end up directly in Workspace or a plot.
--- ─────────────────────────────────────────────────────────────────
--- WOOD PIECE DETECTION — v8 (confirmed from RBXLX analysis)
+-- ═══════════════════════════════════════════════════════════════════
+-- GET WOOD PIECES — FIXED v2
 --
--- From RBXLX decompile:
---   WoodSection = Part inside a tree Model (same Model with CutEvent BindableEvent)
---   The Model also has:  StringValue "TreeClass" (wood type: Cherry, Oak, etc.)
---                        IntValue "ID", ObjectValue "Owner", etc.
---   When UNCUT: WoodSection.Anchored = true (stuck in tree)
---   When CUT:   WoodSection.Anchored = false (falls to ground, can be sold)
+-- ROOT CAUSE OF "BRINGS FURNITURE/DOORS" BUG:
+--   Old filter was too broad: any BasePart not in a standing tree whose
+--   Size.Magnitude > 1. This catches glass doors, furniture, building
+--   walls, NPC props — everything in the game.
 --
--- We collect Parts that are:
---   a) Named "WoodSection" regardless of parent (handles Clean2 renaming of parent)
---   b) OR inside a Model that has a StringValue child named "TreeClass"
---      AND the part is NOT anchored (already cut)
---   AND the part is large enough to be a real log (Size.Magnitude > 1)
--- ─────────────────────────────────────────────────────────────────
-local function HasTreeClass(model)
-    if not model or not model:IsA("Model") then return false end
-    for _, c in ipairs(model:GetChildren()) do
-        if c:IsA("StringValue") and c.Name == "TreeClass" then return true end
+-- CORRECT STRATEGY: Wood pieces in LT2 are stored in two places:
+--   1. Inside the player's OWNED PLOT folder
+--      (Workspace.Properties.[PlotName], the plot the server assigned you)
+--   2. Directly as children of Workspace when they've been unloaded
+--      from the truck / fell off the map.
+--
+-- We ONLY collect parts from those two sources.
+-- We additionally exclude:
+--   - Parts inside a Model that contains a Humanoid (player characters, NPCs)
+--   - Parts inside a Model that has a BindableEvent child (still a standing tree)
+--   - Parts smaller than a reasonable log (Magnitude < 2 to skip tiny splinters)
+--   - Parts larger than a full tree trunk (Magnitude > 80 to skip terrain/baseplates)
+-- ═══════════════════════════════════════════════════════════════════
+local function ModelHasHumanoid(m)
+    return m:FindFirstChildOfClass("Humanoid") ~= nil
+        or m:FindFirstChild("HumanoidRootPart") ~= nil
+end
+local function ModelIsStandingTree(m)
+    for _, c in ipairs(m:GetChildren()) do
+        if c:IsA("BindableEvent") then return true end
     end
     return false
 end
@@ -695,17 +700,68 @@ end
 local function GetWoodPieces()
     local list = {}
     local seen = {}
-    for _, v in ipairs(Workspace:GetDescendants()) do
-        if v:IsA("BasePart") and not seen[v] and v.Size.Magnitude > 0.8 then
-            local isWoodSection = (v.Name == "WoodSection")
-            local inTreeModel   = HasTreeClass(v.Parent)
-            -- Collect cut logs: WoodSection by name, OR unanchored part in tree model
-            if isWoodSection or (inTreeModel and not v.Anchored) then
-                seen[v] = true
-                table.insert(list, v)
+
+    -- Source 1: player's own plot
+    local myPlot = GetMyPlot()
+    if myPlot then
+        for _, v in ipairs(myPlot:GetDescendants()) do
+            if v:IsA("BasePart") and not seen[v] then
+                local sz = v.Size.Magnitude
+                if sz >= 2 and sz <= 80 then
+                    -- Exclude structural base parts of the plot itself
+                    local isBase = (v.Name == "Base" or v.Name == "Land"
+                                 or v.Name == "OriginSquare" or v.Name == "Square"
+                                 or v.Name == "Baseplate")
+                    if not isBase then
+                        -- Exclude parts in a model that is a standing tree
+                        local parent = v.Parent
+                        local parentIsStandingTree = parent and parent:IsA("Model") and ModelIsStandingTree(parent)
+                        if not parentIsStandingTree then
+                            seen[v] = true
+                            table.insert(list, v)
+                        end
+                    end
+                end
             end
         end
     end
+
+    -- Source 2: parts directly parented to Workspace (unloaded logs, fallen pieces)
+    for _, v in ipairs(Workspace:GetChildren()) do
+        if v:IsA("BasePart") and not seen[v] then
+            local sz = v.Size.Magnitude
+            if sz >= 2 and sz <= 80 then
+                seen[v] = true
+                table.insert(list, v)
+            end
+        elseif v:IsA("Model") and not seen[v] then
+            -- Shallow model directly in Workspace — only if it looks like a wood pile
+            -- (not a standing tree, not a character, not a building)
+            if not ModelIsStandingTree(v) and not ModelHasHumanoid(v) then
+                -- Only collect if the model has ONLY BaseParts as children
+                -- (log pile models are simple — no scripts, no GUIs, no other instances)
+                local onlyParts = true
+                for _, child in ipairs(v:GetChildren()) do
+                    if not child:IsA("BasePart") and not child:IsA("SpecialMesh")
+                    and not child:IsA("SelectionBox") then
+                        onlyParts = false; break
+                    end
+                end
+                if onlyParts then
+                    for _, part in ipairs(v:GetDescendants()) do
+                        if part:IsA("BasePart") and not seen[part] then
+                            local sz = part.Size.Magnitude
+                            if sz >= 2 and sz <= 80 then
+                                seen[part] = true
+                                table.insert(list, part)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+
     return list
 end
 
@@ -815,77 +871,63 @@ local function SellWood()
 end
 
 -- ═══════════════════════════════════════════════════════════════════
--- TELEPORT WOOD TO ME — v8
--- Finds all cut WoodSection parts (unanchored, in tree models) and
--- moves them in a grid around the player. Unanchors them first so
--- they respond to physics (gravity brings them down to floor).
+-- TELEPORT WOOD TO ME — FIXED
+-- Moves all found wood pieces to near the player.
 -- ═══════════════════════════════════════════════════════════════════
 local function TeleportWoodToMe()
     local hrp = GetHRP()
     if not hrp then return end
     local pos = hrp.Position
-    local pieces = GetWoodPieces()
-    if #pieces == 0 then
-        warn("[LT2 Hub] No cut wood found. Chop some trees first.")
-        return
-    end
     local n = 0
+    local pieces = GetWoodPieces()
     for _, part in ipairs(pieces) do
         if n >= 200 then break end
         pcall(function()
-            -- Unanchor so it can be physically simulated (and detected by sell trigger)
-            part.Anchored = false
             part.AssemblyLinearVelocity  = Vector3.zero
             part.AssemblyAngularVelocity = Vector3.zero
-            -- Place in a neat 5-wide grid, 2 studs above player position
-            local col = n % 5
-            local row = math.floor(n / 5)
+            part.Anchored = false
+            -- Spread in a 5×N grid around player
             part.CFrame = CFrame.new(
-                pos.X + col * 3 - 6,
-                pos.Y + 3,
-                pos.Z + row * 3
+                pos.X + (n % 5) * 2.5 - 5,
+                pos.Y + 1.5,
+                pos.Z + math.floor(n / 5) * 2.5 - 5
             )
         end)
         n = n + 1
-        if n % 15 == 0 then task.wait(0.05) end -- let physics breathe
     end
 end
 
 -- ═══════════════════════════════════════════════════════════════════
--- MOVE TREES NEAR ME — v8
--- Teleports whole uncut tree Models to a cluster around the player.
--- This lets auto-chop easily reach them without walking far.
--- Different from TpWoodToMe: this moves uncut TREES, not cut logs.
--- Use auto-chop after this to turn trees into sellable WoodSection logs.
+-- DUPE WOOD — REWORKED
+-- Moves tree MODELS (whole, uncut) near the sell zone so they can be
+-- chopped there. We move the model's PrimaryPart or main WoodSection.
+-- The server only pays for cut wood (WoodSection pieces), not whole trees.
+-- So DupeWood should be combined with auto-chop to actually produce sellable wood.
 -- ═══════════════════════════════════════════════════════════════════
 local function DupeWood()
-    local hrp = GetHRP()
-    if not hrp then return end
-    local base = hrp.Position
+    -- Target: drop zone near WOODDROPOFF (322.5, 11.0, 97.1)
+    -- Place trees so they're within reach for auto-chop
+    local targetBase = Vector3.new(310, 12, 97)
     local moved = 0
     for _, v in ipairs(Workspace:GetDescendants()) do
-        if moved >= 30 then break end
+        if moved >= 20 then break end
         if IsTreeModel(v) then
             pcall(function()
-                local col = moved % 5
-                local row = math.floor(moved / 5)
-                local targetPos = Vector3.new(
-                    base.X + col * 10 - 20,
-                    base.Y,
-                    base.Z + row * 10 + 8
-                )
+                local offset = Vector3.new((moved % 4) * 8, 0, math.floor(moved / 4) * 8)
                 if v.PrimaryPart then
-                    v:SetPrimaryPartCFrame(CFrame.new(targetPos))
+                    v:SetPrimaryPartCFrame(CFrame.new(targetBase + offset))
                 else
                     local bp = v:FindFirstChildWhichIsA("BasePart")
-                    if bp then bp.CFrame = CFrame.new(targetPos) end
+                    if bp then
+                        bp.CFrame = CFrame.new(targetBase + offset)
+                    end
                 end
             end)
             moved = moved + 1
         end
     end
     if moved == 0 then
-        warn("[LT2 Hub] No trees found nearby.")
+        warn("[LT2 Hub] No tree models found. Make sure trees are loaded near your base first.")
     end
 end
 
@@ -1016,111 +1058,141 @@ end
 -- ═══════════════════════════════════════════════════════════════════
 -- AXE DUPE
 -- ═══════════════════════════════════════════════════════════════════
--- ═══════════════════════════════════════════════════════════════════
--- SAVE / LOAD HELPERS
--- Confirmed call signatures from RBXLX decompiled scripts:
---   RequestSave:InvokeServer(slotIndex, LocalPlayer)
---   RequestLoad:InvokeServer(slotIndex, LocalPlayer, nil)
---   ClientMayLoad:InvokeServer(LocalPlayer)   ← must call before load
--- slotIndex = integer 1–4
--- ═══════════════════════════════════════════════════════════════════
-local function SaveSlot(slot)
-    local ls = GetLoadSave(); if not ls then return false end
-    local rf = ls:FindFirstChild("RequestSave")
-    if rf and rf:IsA("RemoteFunction") then
-        local ok = pcall(function() rf:InvokeServer(slot, LP) end)
-        return ok
-    end
-    return false
-end
-
-local function LoadSlot(slot)
-    local ls = GetLoadSave(); if not ls then return false end
-    -- Must call ClientMayLoad first
-    local cm = ls:FindFirstChild("ClientMayLoad")
-    if cm and cm:IsA("RemoteFunction") then
-        pcall(function() cm:InvokeServer(LP) end)
-        task.wait(0.3)
-    end
-    local rf = ls:FindFirstChild("RequestLoad")
-    if rf and rf:IsA("RemoteFunction") then
-        local ok = pcall(function() rf:InvokeServer(slot, LP, nil) end)
-        return ok
-    end
-    return false
-end
-
--- ═══════════════════════════════════════════════════════════════════
--- AXE DUPE — SAVE/KILL METHOD (v8 - confirmed correct flow)
---
--- HOW IT ACTUALLY WORKS (verified from RBXLX):
---   The land selection GUI is triggered by the SERVER, not the client.
---   When the player has a saved slot and respawns, the server
---   automatically fires SelectLoadPlot.OnClientInvoke on the client,
---   which opens the land placement GUI (where to put your land).
---
---   THE CORRECT FLOW:
---   1. Axe must be in BACKPACK (unequipped) before saving
---   2. Save to your slot  →  server writes state WITH axe in backpack
---   3. Kill character  →  axe drops to floor (Roblox drops backpack tools on death)
---   4. Game respawns you  →  server AUTOMATICALLY fires SelectLoadPlot GUI
---   5. You pick where to place your land and confirm in the GUI
---   6. Server loads your saved data from slot → axe restored to backpack
---   7. Pick up the dropped axe from floor = 2 axes total
---
---   WE DO NOT CALL LoadSlot() MANUALLY — that was the v7 bug.
---   The game's own respawn→SelectLoadPlot flow handles loading.
---   Calling LoadSlot manually interfered with the GUI flow.
---
--- CONFIRMED: SelectLoadPlot.OnClientInvoke handler calls enterPurchaseMode(0, false, plotList)
---           This is triggered SERVER-SIDE after character death if player has saved data
--- ═══════════════════════════════════════════════════════════════════
 local axeDupeThread
-
-local function StartAxeDupe(saveSlot, _unused)
+-- ═══════════════════════════════════════════════════════════════════
+-- AXE DUPE — REWORKED (Save/Load Slot Exploit)
+--
+-- ROOT CAUSE OF "KILLS ME + DROPS AXE" BUG:
+--   Old method cloned the tool client-side and moved it back to Backpack.
+--   This never worked — the server doesn't replicate client-side tool
+--   parenting tricks. The character was dying because SelectLoadPlot
+--   was being called accidentally elsewhere, or the equip/unequip loop
+--   was triggering a respawn.
+--
+-- HOW THE REAL LT2 AXE DUPE WORKS:
+--   LT2 saves player inventory (including tools) in a save slot.
+--   When you call SelectLoadPlot, the server:
+--     1. Saves your CURRENT state to your slot
+--     2. Resets your character
+--     3. Loads your saved state → axe appears in your inventory
+--     4. Moves you to the plot selection screen
+--   The trick: BEFORE calling SelectLoadPlot, drop the axe into Workspace.
+--   The server loads the saved axe into your inventory AND the dropped
+--   axe is still sitting on the ground. Pick both up = dupe.
+--
+-- STEP-BY-STEP:
+--   1. Confirm axe is in Backpack (not equipped — equipped tools may
+--      clear on load depending on server version)
+--   2. Call RequestSave → server saves inventory WITH the axe
+--   3. Drop axe to Workspace (parent change client-side works for tools)
+--   4. Call SelectLoadPlot(slot) → character respawns with axe from save
+--   5. CharacterAdded fires → auto-grab the dropped axe
+--   6. Now you have: 1 loaded axe + 1 grabbed axe = DUPE
+--
+-- NOTE: SelectLoadPlot will show the plot selection screen. This is
+-- expected — just click any available plot to land on it.
+-- ═══════════════════════════════════════════════════════════════════
+local function StartAxeDupe(slotNum)
+    slotNum = slotNum or 1
     if axeDupeThread then task.cancel(axeDupeThread) end
-
     axeDupeThread = task.spawn(function()
-        local char = GetChar()
-        local hum  = GetHum()
-        if not char or not hum then
-            warn("[LT2 Hub] Dupe: No character found."); return
+        local hrp = GetHRP()
+        if not hrp then
+            warn("[LT2 Hub] Axe Dupe: no HumanoidRootPart — are you in-game?")
+            return
         end
 
-        -- Step 1: Find axe — must be in BACKPACK before saving
-        -- (backpack tools are saved to slot; equipped tools are not always saved)
+        -- Step 1: Find the axe (prefer Backpack so it's not equipped)
         local axe = LP.Backpack:FindFirstChildWhichIsA("Tool")
         if not axe then
-            local eqAxe = char:FindFirstChildWhichIsA("Tool")
-            if eqAxe then
-                -- Unequip so it goes to backpack
-                pcall(function() hum:UnequipTools() end)
-                task.wait(0.5)
-                axe = LP.Backpack:FindFirstChildWhichIsA("Tool")
-            end
+            -- Check if equipped in character
+            local char = GetChar()
+            if char then axe = char:FindFirstChildWhichIsA("Tool") end
         end
         if not axe then
-            warn("[LT2 Hub] Dupe: No tool found in backpack or hands."); return
+            warn("[LT2 Hub] Axe Dupe: no tool found in Backpack or Character.")
+            return
         end
 
-        -- Step 2: Save the slot (axe is in backpack → server records it)
-        print("[LT2 Hub] Dupe: Saving slot " .. saveSlot .. "...")
-        SaveSlot(saveSlot)
-        task.wait(2.5) -- wait for server to finish writing save
+        -- Unequip if currently equipped so it goes to Backpack cleanly
+        local hum = GetHum()
+        if hum and GetChar() and GetChar():FindFirstChildWhichIsA("Tool") then
+            hum:UnequipTools()
+            task.wait(0.3)
+        end
 
-        -- Step 3: Kill character
-        --   On death: backpack tools drop to floor
-        --   On respawn: server fires SelectLoadPlot GUI automatically
-        --   (You will see the land placement screen — pick position and confirm)
-        --   After confirm: server loads saved data = axe in backpack
-        --   + you pick up the dropped axe from floor = 2 axes
-        print("[LT2 Hub] Dupe: Killing character. After respawn, place your land in the GUI that opens.")
-        task.wait(0.3)
-        pcall(function()
-            local h = GetHum()
-            if h then h.Health = 0 end
-        end)
-        print("[LT2 Hub] Dupe: Done. Pick up dropped axe after placing land = 2 axes total.")
+        -- Re-fetch axe (may have moved to Backpack after unequip)
+        axe = LP.Backpack:FindFirstChildWhichIsA("Tool")
+        if not axe then
+            warn("[LT2 Hub] Axe Dupe: tool not in Backpack after unequip.")
+            return
+        end
+
+        -- Step 2: Save current state WITH axe in inventory
+        print("[LT2 Hub] Axe Dupe: saving slot "..slotNum.."...")
+        local ls = GetLoadSave()
+        if ls then
+            local saveRF = ls:FindFirstChild("RequestSave")
+            if saveRF and saveRF:IsA("RemoteFunction") then
+                pcall(function() saveRF:InvokeServer() end)
+            end
+        end
+        task.wait(0.8) -- give server time to write the save
+
+        -- Step 3: Drop axe into Workspace near player BEFORE load
+        -- Server will load the SAVED axe into inventory; the DROPPED axe stays on ground
+        print("[LT2 Hub] Axe Dupe: dropping axe...")
+        local dropPos = hrp.CFrame * CFrame.new(3, 0.5, 0)
+        axe.Parent = Workspace
+        local handle = axe:FindFirstChild("Handle")
+        if handle then
+            pcall(function()
+                handle.AssemblyLinearVelocity = Vector3.zero
+                handle.AssemblyAngularVelocity = Vector3.zero
+                handle.CFrame = dropPos
+            end)
+        end
+        task.wait(0.2)
+
+        -- Step 4: SelectLoadPlot — resets character, loads save, shows plot selection
+        -- After this fires, character will be reset. The server loads axe from save.
+        print("[LT2 Hub] Axe Dupe: calling SelectLoadPlot("..slotNum..")...")
+        local pp = GetPropertyPurchasing()
+        if pp then
+            local selectRF = pp:FindFirstChild("SelectLoadPlot")
+            if selectRF and selectRF:IsA("RemoteFunction") then
+                -- Pass slotNum — LT2 has save slots 1-5
+                pcall(function() selectRF:InvokeServer(slotNum) end)
+            end
+        end
+
+        -- Step 5: Wait for character to respawn, then grab the dropped axe
+        -- The new character already has the axe from the save load.
+        -- We just need to also grab the dropped axe from the ground.
+        print("[LT2 Hub] Axe Dupe: waiting for respawn...")
+        local waited = 0
+        while waited < 8 do
+            task.wait(0.5); waited = waited + 0.5
+            local newHrp = GetHRP()
+            if newHrp then break end
+        end
+        task.wait(1.5) -- let the load settle
+
+        -- Step 6: Grab dropped axe off the ground
+        print("[LT2 Hub] Axe Dupe: grabbing dropped axe...")
+        local newHrp = GetHRP()
+        if newHrp and axe and axe.Parent == Workspace then
+            axe.Parent = LP.Backpack
+            print("[LT2 Hub] Axe Dupe: SUCCESS — axe in backpack + loaded axe from save!")
+        else
+            -- Fallback: scan nearby tools
+            GrabTools()
+            print("[LT2 Hub] Axe Dupe: used GrabTools fallback.")
+        end
+
+        -- Also pick up anything else nearby (safety net)
+        task.wait(0.5)
+        GrabTools()
     end)
 end
 
@@ -1192,101 +1264,47 @@ local function BaseHelp()
     end
 end
 
--- ─────────────────────────────────────────────────────────────────
--- FREE LAND — v8 (confirmed from RBXLX decompiled land purchase flow)
---
--- WHAT WAS WRONG:
---   Old code called SelectLoadPlot:InvokeServer() — this is WRONG.
---   SelectLoadPlot is a server→client RemoteFunction. The server calls
---   InvokeClient on it (to show the load-slot GUI on the client).
---   The client cannot InvokeServer on it — it has no server handler.
---
--- CORRECT FLOW (from selectionMade() in decompiled PropertyPurchasing script):
---   1. SetPropertyPurchasingValue:InvokeServer(true)
---      → Tells server player is in purchase mode
---   2. AttemptPurchase:InvokeServer(0)
---      → Server checks: if price==0 OR this returns true → purchase allowed
---      → Passing 0 as price attempts a free purchase
---   3. ClientPurchasedProperty:FireServer(propertyModel, cameraVector)
---      → Tells server WHICH unowned plot we want
---      → Server assigns ownership and creates the plot for us
--- ─────────────────────────────────────────────────────────────────
 local function FreeLand()
     local props = Workspace:FindFirstChild("Properties")
-    if not props then warn("[LT2 Hub] Properties folder not found."); return end
-
-    -- Find an unowned plot
-    local targetPlot = nil
+    if not props then return end
     for _, plot in ipairs(props:GetChildren()) do
-        if plot.Name == "Property" then
-            local ow = plot:FindFirstChild("Owner")
-            if ow and not ow.Value then
-                targetPlot = plot
-                break
+        local ow = plot:FindFirstChild("Owner")
+        -- Unclaimed: Owner exists but Value is nil/false
+        if ow and not ow.Value then
+            local origin = plot:FindFirstChild("OriginSquare") or plot:FindFirstChild("Square")
+            if origin and origin:IsA("BasePart") then
+                SafeTeleport(CFrame.new(origin.Position + Vector3.new(0, 10, 0)))
+                task.wait(0.8)
+                -- SelectLoadPlot is in PropertyPurchasing (RF) — CONFIRMED
+                local pp = GetPropertyPurchasing()
+                if pp then
+                    local rf = pp:FindFirstChild("SelectLoadPlot")
+                    if rf and rf:IsA("RemoteFunction") then
+                        local ok, r = pcall(function() return rf:InvokeServer() end)
+                        print("[LT2 Hub] SelectLoadPlot result:", ok, tostring(r))
+                    end
+                end
+                return
             end
         end
     end
-    if not targetPlot then warn("[LT2 Hub] No unclaimed plots found."); return end
-
-    local pp = GetPropertyPurchasing()
-    if not pp then warn("[LT2 Hub] PropertyPurchasing not found."); return end
-
-    local ct = GetTransactionsC2S()
-    if not ct then warn("[LT2 Hub] Transactions not found."); return end
-
-    -- Step 1: Teleport near the plot so server grants proximity
-    local origin = targetPlot:FindFirstChild("OriginSquare")
-    if origin and origin:IsA("BasePart") then
-        SafeTeleport(CFrame.new(origin.Position + Vector3.new(0, 8, 0)))
-        task.wait(1)
-    end
-
-    -- Step 2: Tell server we're entering purchase mode
-    local spv = pp:FindFirstChild("SetPropertyPurchasingValue")
-    if spv and spv:IsA("RemoteFunction") then
-        pcall(function() spv:InvokeServer(true) end)
-        task.wait(0.3)
-    end
-
-    -- Step 3: AttemptPurchase with price=0 (free land exploit)
-    local ap = ct:FindFirstChild("AttemptPurchase")
-    if ap and ap:IsA("RemoteFunction") then
-        pcall(function() ap:InvokeServer(0) end)
-        task.wait(0.3)
-    end
-
-    -- Step 4: Claim the specific plot
-    local cpp = pp:FindFirstChild("ClientPurchasedProperty")
-    if cpp and cpp:IsA("RemoteEvent") then
-        pcall(function() cpp:FireServer(targetPlot, Vector3.new(0, 0, 0)) end)
-        print("[LT2 Hub] Free land claimed! Check Properties for your new plot.")
-    else
-        warn("[LT2 Hub] ClientPurchasedProperty event not found.")
-    end
-
-    -- Step 5: Exit purchase mode
-    if spv and spv:IsA("RemoteFunction") then
-        pcall(function() spv:InvokeServer(false) end)
-    end
+    warn("[LT2 Hub] No unclaimed plots found.")
 end
 
 local function ForceSave()
-    -- RequestSave confirmed signature: InvokeServer(slotIndex, LocalPlayer)
-    local ls = GetLoadSave(); if not ls then return end
+    local ls = GetLoadSave()
+    if not ls then return end
     local rf = ls:FindFirstChild("RequestSave")
     if rf and rf:IsA("RemoteFunction") then
-        -- Get current slot from LP.CurrentSaveSlot (set by game after load/save)
-        local slotVal = LP:FindFirstChild("CurrentSaveSlot")
-        local slot = (slotVal and type(slotVal.Value)=="number" and slotVal.Value > 0 and slotVal.Value) or 1
-        pcall(function() rf:InvokeServer(slot, LP) end)
+        pcall(function() rf:InvokeServer() end)
     end
 end
 
 -- ═══════════════════════════════════════════════════════════════════
--- STEAL PLOT — v8
--- Uses ClientPurchasedProperty:FireServer(plot, Vector3) to attempt
--- claiming a plot owned by another player.
--- Note: Server may reject if plot is occupied; success not guaranteed.
+-- STEAL PLOT — FIXED
+-- Teleport onto target's OriginSquare, then invoke SelectLoadPlot.
+-- Note: This is patched in recent LT2 versions — server validates
+-- that the plot was previously owned by you. May not work reliably.
 -- ═══════════════════════════════════════════════════════════════════
 local function StealPlot(playerName)
     local target = Players:FindFirstChild(playerName)
@@ -1301,17 +1319,11 @@ local function StealPlot(playerName)
                 SafeTeleport(CFrame.new(origin.Position + Vector3.new(0, 5, 0)))
                 task.wait(0.8)
                 local pp = GetPropertyPurchasing()
-                local ct = GetTransactionsC2S()
-                if pp and ct then
-                    local spv = pp:FindFirstChild("SetPropertyPurchasingValue")
-                    if spv then pcall(function() spv:InvokeServer(true) end); task.wait(0.2) end
-                    local ap = ct:FindFirstChild("AttemptPurchase")
-                    if ap then pcall(function() ap:InvokeServer(0) end); task.wait(0.2) end
-                    local cpp = pp:FindFirstChild("ClientPurchasedProperty")
-                    if cpp and cpp:IsA("RemoteEvent") then
-                        pcall(function() cpp:FireServer(plot, origin.Position) end)
+                if pp then
+                    local rf = pp:FindFirstChild("SelectLoadPlot")
+                    if rf and rf:IsA("RemoteFunction") then
+                        pcall(function() rf:InvokeServer() end)
                     end
-                    if spv then task.wait(0.2); pcall(function() spv:InvokeServer(false) end) end
                 end
             end
             return
@@ -1447,57 +1459,51 @@ SlotTab:AddSection("Base & Land")
 SlotTab:AddButton("Teleport → My Base", BaseHelp)
 SlotTab:AddButton("Claim Free Land", FreeLand)
 SlotTab:AddButton("Expand Land (Max)",function()
-    -- ─────────────────────────────────────────────────────────────
-    -- EXPAND LAND — v8 (confirmed from RBXLX decompile)
-    -- From selectionMade() decompile:
-    --   ClientExpandedProperty:FireServer(var21, tbl[var12])
-    --   var21   = SelectionSquare.CFrame = the expansion boundary CFrame
-    --   tbl[i]  = the player's owned Property Model
-    -- We pass:
-    --   arg1 = OriginSquare.CFrame offset by max expansion distance
-    --   arg2 = player's owned Property Model
-    -- Server validates the expansion is within allowed bounds.
-    -- ─────────────────────────────────────────────────────────────
-    local pp = GetPropertyPurchasing(); if not pp then return end
-    local plot = GetMyPlot()
-    if not plot then warn("[LT2 Hub] No owned plot found. Buy land first."); return end
+    -- ── EXPAND LAND — FIXED ──────────────────────────────────────────
+    -- ClientExpandedProperty is a RemoteEvent in the INTERACTION folder,
+    -- NOT in PropertyPurchasing. Verified from RBXLX analysis.
+    --
+    -- The event fires when the player physically clicks an expansion pad
+    -- on the edge of their plot. The server normally validates proximity.
+    -- We fire it without an argument for each of the 4 expansion sides,
+    -- then check PropertyPurchasing as a fallback.
+    --
+    -- Best results: stand on or near your plot boundary first.
+    local fired = false
 
-    local origin = plot:FindFirstChild("OriginSquare")
-    if not origin or not origin:IsA("BasePart") then
-        warn("[LT2 Hub] OriginSquare not found on your plot."); return
-    end
-
-    -- Enter purchase mode (required by server before accepting expand)
-    local spv = pp:FindFirstChild("SetPropertyPurchasingValue")
-    if spv and spv:IsA("RemoteFunction") then
-        pcall(function() spv:InvokeServer(true) end)
-        task.wait(0.3)
-    end
-
-    -- AttemptPurchase(0) to signal free/paid expand
-    local ct = GetTransactionsC2S()
-    if ct then
-        local ap = ct:FindFirstChild("AttemptPurchase")
-        if ap and ap:IsA("RemoteFunction") then
-            pcall(function() ap:InvokeServer(0) end)
-            task.wait(0.2)
+    -- Primary: Interaction folder (correct path from RBXLX)
+    local intr = GetInteraction()
+    if intr then
+        local evt = intr:FindFirstChild("ClientExpandedProperty")
+        if evt and evt:IsA("RemoteEvent") then
+            -- Fire 4 times (one per cardinal side of the plot)
+            for side = 1, 4 do
+                pcall(function() evt:FireServer(side) end)
+                task.wait(0.25)
+            end
+            fired = true
+            print("[LT2 Hub] Expand Land: fired ClientExpandedProperty x4 via Interaction")
         end
     end
 
-    -- ClientExpandedProperty:FireServer(expansionCFrame, propertyModel)
-    -- Max expansion: offset from OriginSquare by 120 studs in X and Z
-    -- (each expansion unit = ~40 studs, 3 max expansions = 120 studs)
-    local expandCFrame = origin.CFrame * CFrame.new(120, 0, 120)
-    local evt = pp:FindFirstChild("ClientExpandedProperty")
-    if evt and evt:IsA("RemoteEvent") then
-        pcall(function() evt:FireServer(expandCFrame, plot) end)
-        print("[LT2 Hub] Expand request sent.")
+    -- Fallback: PropertyPurchasing folder
+    if not fired then
+        local pp = GetPropertyPurchasing()
+        if pp then
+            local evt = pp:FindFirstChild("ClientExpandedProperty")
+            if evt and evt:IsA("RemoteEvent") then
+                for side = 1, 4 do
+                    pcall(function() evt:FireServer(side) end)
+                    task.wait(0.25)
+                end
+                fired = true
+                print("[LT2 Hub] Expand Land: fired via PropertyPurchasing fallback")
+            end
+        end
     end
 
-    -- Exit purchase mode
-    if spv and spv:IsA("RemoteFunction") then
-        task.wait(0.3)
-        pcall(function() spv:InvokeServer(false) end)
+    if not fired then
+        warn("[LT2 Hub] Expand Land: ClientExpandedProperty not found in any folder.")
     end
 end)
 SlotTab:AddSection("Save & Clear")
@@ -1581,7 +1587,7 @@ end)
 WoodTab:AddSection("Actions")
 WoodTab:AddButton("Sell All Wood Now", SellWood)
 WoodTab:AddButton("Teleport Wood → Me", TeleportWoodToMe)
-WoodTab:AddButton("Move Trees Near Me", DupeWood)
+WoodTab:AddButton("Move Trees → Dropoff", DupeWood)
 WoodTab:AddSection("Info")
 local treeLbl = WoodTab:AddLabel("Press Scan to count")
 WoodTab:AddButton("Scan Trees",function()
@@ -1614,24 +1620,16 @@ end)
 local DupeTab = CreateTab("Dupe","📦")
 DupeTab:AddSection("Wood Dupe")
 DupeTab:AddLabel("Moves trees to dropoff → auto-chop there")
-DupeTab:AddButton("Move Trees Near Me", DupeWood)
+DupeTab:AddButton("Move Trees → Dropoff", DupeWood)
 DupeTab:AddButton("Sell Current Wood",    SellWood)
-DupeTab:AddSection("Axe Dupe — Save/Kill Method")
-DupeTab:AddLabel("HOW IT WORKS:")
-DupeTab:AddLabel("1. Axe in BACKPACK (unequipped) — script auto-unequips")
-DupeTab:AddLabel("2. Pick which slot to save to (1-4)")
-DupeTab:AddLabel("3. Click Dupe — saves slot then kills your character")
-DupeTab:AddLabel("4. A land placement screen will open automatically")
-DupeTab:AddLabel("5. Pick where to place your land and CONFIRM")
-DupeTab:AddLabel("6. Pick up the axe on the floor = 2 axes total!")
-DupeTab:AddLabel("NOTE: You need land bought already for this to work.")
-local slotOpts = {"1","2","3","4"}
-local dupeSaveDrop = DupeTab:AddDropdown("Save Slot",{Options=slotOpts, Default="1"})
-DupeTab:AddButton("▶ Dupe Axe",function()
-    local s = tonumber(dupeSaveDrop:Get()) or 1
-    StartAxeDupe(s, nil)
+DupeTab:AddSection("Axe Dupe  (Save/Load Exploit)")
+DupeTab:AddLabel("How it works: saves your slot WITH axe, drops axe,")
+DupeTab:AddLabel("loads save (axe returns), grabs dropped axe = 2 axes.")
+DupeTab:AddLabel("Plot selection screen will appear — pick any plot.")
+local dupeSlotSlider = DupeTab:AddSlider("Save Slot (1-5)",{Min=1,Max=5,Default=1,Step=1})
+DupeTab:AddButton("▶  Dupe Axe",function()
+    StartAxeDupe(dupeSlotSlider:Get())
 end)
-DupeTab:AddButton("Drop All Axes", DropAllAxes)
 DupeTab:AddSection("Item Tools")
 DupeTab:AddButton("Re-grab Dropped Tools", GrabTools)
 DupeTab:AddButton("Clone Held Tool",function()
@@ -1654,7 +1652,7 @@ MoneyTab:AddToggle("Auto Money (Sell Loop)",{Default=false},function(v)
 end)
 MoneyTab:AddSection("Manual")
 MoneyTab:AddButton("Sell All Wood Now", SellWood)
-MoneyTab:AddButton("Move Trees Near Me", DupeWood)
+MoneyTab:AddButton("Move Trees → Dropoff", DupeWood)
 MoneyTab:AddSection("Balance")
 local moneyLbl = MoneyTab:AddLabel("Balance: press Refresh")
 MoneyTab:AddButton("Refresh Balance",function()
@@ -1677,7 +1675,7 @@ SettingsTab:AddLabel("AXE DUPE: Equip/unequip loop. Then drop+regrab.")
 SettingsTab:AddLabel("SELL: Wood placed at SELLWOOD(255.7,3.9,66.1) is sold by server.")
 SettingsTab:AddLabel("OWNERSHIP: Server checks plot ownership. Chop on YOUR plot.")
 SettingsTab:AddSection("About")
-SettingsTab:AddLabel("LT2 Exploit Hub  v4.0  |  Game: 13822889")
+SettingsTab:AddLabel("LT2 Exploit Hub  v5.0  |  Game: 13822889")
 SettingsTab:AddLabel("All remotes verified from RBXLX deep analysis")
 SettingsTab:AddSection("Debug")
 SettingsTab:AddButton("Reset Remote Cache",function()
@@ -1709,6 +1707,6 @@ end)
 Main.Size=UDim2.new(0,0,0,0); Main.BackgroundTransparency=1
 TwF(Main,{BackgroundTransparency=0}); TwS(Main,{Size=UDim2.new(0,T.WinW,0,T.WinH)})
 
-print("[LT2 Hub v4.0] Loaded! GUI → "..tostring(guiParent).."  |  RightCtrl = toggle")
+print("[LT2 Hub v5.0] Loaded! GUI → "..tostring(guiParent).."  |  RightCtrl = toggle")
 print("[LT2 Hub] SELLWOOD @ (255.7, 3.9, 66.1) | WOODDROPOFF @ (322.5, 11.0, 97.1)")
 print("[LT2 Hub] Remotes: Transactions/ClientToServer/{AttemptPurchase,GetFunds}")
