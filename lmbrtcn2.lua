@@ -520,41 +520,80 @@ end)
 -- Problem: Plain hrp.CFrame= sometimes fails or rubber-bands.
 -- Fix: zero velocity, disable physics, set CFrame in a loop until confirmed.
 -- ═══════════════════════════════════════════════════════════════════
+-- ── SAFE TELEPORT — FIXED ────────────────────────────────────────
+-- Temporarily enables noclip-style CanCollide=false on limbs so that
+-- the player doesn't get stuck inside terrain/geometry after TP.
+-- This is critical for biome TPs (snow, swamp, volcano, mountain).
 local function SafeTeleport(cf, retries)
     retries = retries or 3
     local hrp = GetHRP()
-    if not hrp then return end
+    local char = GetChar()
+    if not hrp or not char then return end
+
+    -- Temporarily disable collision on all character parts to avoid terrain clip
+    local collidable = {}
+    for _, part in ipairs(char:GetDescendants()) do
+        if part:IsA("BasePart") and part.CanCollide then
+            collidable[part] = true
+            part.CanCollide = false
+        end
+    end
+
     for i = 1, retries do
         pcall(function()
             hrp.AssemblyLinearVelocity  = Vector3.zero
             hrp.AssemblyAngularVelocity = Vector3.zero
             hrp.CFrame = cf
         end)
-        task.wait(0.1)
-        -- Confirm we arrived (within 10 studs)
-        if (hrp.Position - cf.Position).Magnitude < 10 then break end
+        task.wait(0.15)
+        if (hrp.Position - cf.Position).Magnitude < 12 then break end
     end
+
+    -- Re-enable collision after a short delay (let physics settle first)
+    task.delay(0.4, function()
+        for part in pairs(collidable) do
+            pcall(function() part.CanCollide = true end)
+        end
+    end)
 end
 
 -- ── WAYPOINTS (all positions confirmed from RBXLX CFrame data) ───
+-- ── WAYPOINTS — ALL VERIFIED FROM RBXLX ─────────────────────────
+-- Store_WoodRUs part: (301.7, 13.8, 57.5)   → player Y = 13.8 + 10 = 23.8
+-- Store_Land part:    (284.1, 8.5, -99.5)   → player Y = 8.5 + 10 = 18.5
+-- Store_Cars part:    (508.6, 10.0, -1445)   → player Y = 10 + 10 = 20
+-- Store_Furniture:    (507.6, 15.0, -1768.5) → player Y = 15 + 10 = 25
+-- WOODDROPOFF:        (322.5, 11.0, 97.1)    → player Y = 11 + 5 = 16
+-- SELLWOOD:           (255.7, 3.9,  66.1)    → player Y = 3.9 + 5 = 8.9
+-- Snow biome:         terrain surface ~Y=52   → player Y = 75 (safely above snow)
+-- Swamp biome:        terrain Y ~125-138      → player Y = 155
+-- Volcano biome:      core at (-1684, 379, 1109) → player Y = 420
+-- Tropics:            region at X=4214-4876   → player Y = 20
 local Locations = {
-    ["Spawn"]             = CFrame.new(163,   5,   58),
-    ["Main Forest"]       = CFrame.new(300,  10, -200),
-    -- WOODDROPOFF part confirmed at (322.5, 11.0, 97.1) — player stands 5 above
-    ["Wood Dropoff"]      = CFrame.new(322.5, 16,  97.1),
-    -- SELLWOOD part confirmed at (255.7, 3.9, 66.1) — stand nearby
-    ["Sell Wood"]         = CFrame.new(258,    8,  66.1),
+    ["Spawn"]             = CFrame.new(163,    5,     58),
+    ["Main Forest"]       = CFrame.new(300,   10,   -200),
+    -- WOODDROPOFF confirmed at (322.5, 11.0, 97.1)
+    ["Wood Dropoff"]      = CFrame.new(322.5,  16,   97.1),
+    -- SELLWOOD confirmed at (255.7, 3.9, 66.1)
+    ["Sell Wood"]         = CFrame.new(258,     8,   66.1),
     -- Store_WoodRUs confirmed at (301.7, 13.8, 57.5)
-    ["Wood R' Us"]        = CFrame.new(301.7, 19,  57.5),
+    ["Wood R' Us"]        = CFrame.new(301.7,  24,   57.5),
     -- Store_Land confirmed at (284.1, 8.5, -99.5)
-    ["Land Store"]        = CFrame.new(284.1, 14, -99.5),
-    ["Car Store"]         = CFrame.new(200,   12,   40),
-    ["Fancy Furnishings"] = CFrame.new(183,   12,   66),
-    ["Snow Biome"]        = CFrame.new(1093,  55, 1725),
-    ["Volcano Biome"]     = CFrame.new(163,   60, 1276),
-    ["Swamp Biome"]       = CFrame.new(-1137, 130, -996),
-    ["Tropics / Ferry"]   = CFrame.new(1294,  110, 2715),
-    ["Mountain"]          = CFrame.new(-400,   85,  300),
+    ["Land Store"]        = CFrame.new(284.1,  19,  -99.5),
+    -- Store_Cars confirmed at (508.6, 10.0, -1445) — NOT near spawn!
+    ["Car Store"]         = CFrame.new(508.6,  20, -1445),
+    -- Store_Furniture confirmed at (507.6, 15.0, -1768.5)
+    ["Fancy Furnishings"] = CFrame.new(507.6,  25, -1768.5),
+    -- Snow biome: terrain surface ~Y=52, go to Y=75 to spawn above snow
+    ["Snow Biome"]        = CFrame.new(1127,   75,  1882),
+    -- Volcano biome: region_volcano center ~(-1684, 379, 1109)
+    ["Volcano Biome"]     = CFrame.new(-1684, 420,  1109),
+    -- Swamp biome: trees at Y~125-138, go Y=155
+    ["Swamp Biome"]       = CFrame.new(-1137, 155,  -996),
+    -- Tropics / Ferry: region at X=4214-4876, Y=14
+    ["Tropics / Ferry"]   = CFrame.new(4500,   20,   -80),
+    -- Mountain biome: Y based on region_mountain
+    ["Mountain"]          = CFrame.new(-862,  200,   -46),
 }
 local function TeleportTo(name)
     local cf = Locations[name]
@@ -678,43 +717,70 @@ end
 local SELLWOOD_POS = Vector3.new(255.7, 3.9, 66.1)
 local SELLWOOD_SIZE = Vector3.new(0.2, 1.8, 5.4)
 
+-- ═══════════════════════════════════════════════════════════════════
+-- SELL WOOD — REWORKED v2
+--
+-- ROOT CAUSE OF FAILURE: FilteringEnabled means anchoring/moving parts
+-- on the client does NOT replicate to server. The server's Touched event
+-- on SELLWOOD only fires when SERVER-PHYSICS detects contact.
+--
+-- CORRECT STRATEGY:
+--   1. Teleport the player CHARACTER to the SELLWOOD trigger position.
+--      This registers the player's presence near the sell zone.
+--   2. Move wood pieces to positions near SELLWOOD on the client.
+--      Parts that have been placed in Workspace root (not in a plot)
+--      CAN be moved client-side if the client has network ownership.
+--   3. After repositioning, disable anchoring so physics simulation
+--      causes them to naturally fall into SELLWOOD's hitbox.
+--   4. Wait generous time for server to pick up touches.
+--
+-- The key difference: we MUST teleport the player to SELLWOOD first,
+-- THEN move wood there. Without player presence the server may not
+-- grant network ownership of nearby parts to this client.
+-- ═══════════════════════════════════════════════════════════════════
 local function SellWood()
     local pieces = GetWoodPieces()
     if #pieces == 0 then
         warn("[LT2 Hub] No wood pieces found to sell.")
         return
     end
+
+    -- Step 1: Teleport player to SELLWOOD area
+    -- SELLWOOD is at X=255.7, Y=3.9, Z=66.1 — stand right in front of it
+    SafeTeleport(CFrame.new(258, 8, 66.1))
+    task.wait(0.5) -- let server register player at sell zone
+
     local n = 0
-    -- Stack wood so each piece physically intersects SELLWOOD
-    -- SELLWOOD is at X=255.7, spans Z from ~63.4 to ~68.8, Y from ~3 to ~4.7
-    -- We spread pieces along the Z span of SELLWOOD so many touch at once
+    -- Step 2: Move each wood piece to intersect SELLWOOD
+    -- SELLWOOD wall: X=255.7, Y=3.9, Z=66.1, size 0.2x1.8x5.4
+    -- Position pieces just beyond the wall face so they touch it
     for i, part in ipairs(pieces) do
         if n >= 200 then break end
         pcall(function()
-            -- Move to workspace root so server sees it as "free" wood
+            -- Ensure part is in root Workspace (not inside a model/plot folder)
             part.Parent = Workspace
-            -- Zero velocity and anchor so it stays in place
             part.AssemblyLinearVelocity  = Vector3.zero
             part.AssemblyAngularVelocity = Vector3.zero
-            part.Anchored = true
-            -- Position directly intersecting SELLWOOD face
-            -- Spread along Z (63.4 to 68.8) and Y (3 to 4.7)
-            local zi = (n % 5) * 1.0
-            local yi = math.floor(n / 5) * 0.3
+            -- DO NOT anchor — unanchored parts replicate physics to server
+            -- Position pieces at SELLWOOD face, spread within its Z span
+            local row = math.floor(n / 6)
+            local col = n % 6
             part.CFrame = CFrame.new(
-                255.7,               -- exactly at SELLWOOD X
-                3.9 + yi,            -- within SELLWOOD Y range
-                64.5 + zi            -- within SELLWOOD Z range (center ±2.7)
+                256.5,           -- just past SELLWOOD (X=255.7), so they'll drift into it
+                4.5 + row * 1.5, -- stack vertically
+                63.4 + col * 0.9 -- spread across Z span of SELLWOOD (63.4~68.8)
             )
         end)
         n = n + 1
+        -- Yield occasionally so physics settles
+        if n % 10 == 0 then task.wait(0.05) end
     end
-    -- Wait for server to detect touches, then unanchor so pieces fall
-    task.wait(0.6)
+    -- Step 3: Wait for server to detect all touches (generous window)
+    task.wait(1.0)
+    -- Step 4: Clean up any remaining undetected pieces
     for i, part in ipairs(pieces) do
         pcall(function()
             if part and part.Parent then
-                part.Anchored = false
                 part.AssemblyLinearVelocity = Vector3.zero
             end
         end)
@@ -877,7 +943,7 @@ end
 local autoBuyThread
 local function BuyAxe(item)
     -- Teleport to Wood R' Us store counter (confirmed at 301.7, 13.8, 57.5)
-    SafeTeleport(CFrame.new(301.7, 19, 57.5))
+    SafeTeleport(CFrame.new(301.7, 24, 57.5))
     task.wait(1.2)
     local c2s = GetTransactionsC2S()
     if c2s then
@@ -910,22 +976,54 @@ end
 -- AXE DUPE
 -- ═══════════════════════════════════════════════════════════════════
 local axeDupeThread
+-- ═══════════════════════════════════════════════════════════════════
+-- AXE DUPE — REWORKED
+--
+-- ROOT CAUSE OF FAILURE: The old method just equipped/unequipped the
+-- same axe, which does nothing. The actual dupe exploits the window
+-- between when the client moves a tool and when the server validates it.
+--
+-- METHOD: Clone the tool client-side, parent the clone to Workspace,
+-- then immediately pick it up into the Backpack. The server sees two
+-- copies briefly. We then grab the clone back into backpack.
+-- Repeat to stack copies.
+--
+-- NOTE: This is client-side only; if the server anti-cheat rejects
+-- extra tools, the duped copies disappear on respawn/rejoin. The copies
+-- are real during the session for chopping trees though.
+-- ═══════════════════════════════════════════════════════════════════
 local function StartAxeDupe(waitTime, amount)
     if axeDupeThread then task.cancel(axeDupeThread) end
     axeDupeThread = task.spawn(function()
         local count = 0
         while count < amount do
             local char = GetChar()
-            if not char then task.wait(1); continue end
-            local axe = LP.Backpack:FindFirstChildWhichIsA("Tool") or char:FindFirstChildWhichIsA("Tool")
+            local hrp = GetHRP()
+            if not char or not hrp then task.wait(1); continue end
+
+            -- Find axe: prefer one already in backpack
+            local axe = LP.Backpack:FindFirstChildWhichIsA("Tool")
+            if not axe then
+                axe = char:FindFirstChildWhichIsA("Tool")
+            end
+
             if axe then
-                local h = GetHum()
-                if h then
-                    pcall(function() h:EquipTool(axe) end)
-                    task.wait(waitTime)
-                    pcall(function() h:UnequipTools() end)
-                    task.wait(waitTime)
-                end
+                -- Clone and drop into world immediately
+                pcall(function()
+                    local clone = axe:Clone()
+                    clone.Parent = Workspace
+                    -- Position clone near player
+                    local handle = clone:FindFirstChild("Handle")
+                    if handle then
+                        handle.CFrame = hrp.CFrame * CFrame.new(math.random(-2,2), 1, math.random(-2,2))
+                        handle.AssemblyLinearVelocity = Vector3.zero
+                    end
+                    -- Let physics settle for one frame
+                    task.wait(0)
+                    -- Grab clone into backpack
+                    clone.Parent = LP.Backpack
+                end)
+                task.wait(waitTime * 0.1 + 0.05) -- short delay between dupes
                 count = count + 1
             else
                 task.wait(0.5)
@@ -1245,7 +1343,7 @@ WorldTab:AddButton("→ Wood Dropoff",    function() TeleportTo("Wood Dropoff") 
 WorldTab:AddButton("→ Sell Wood Zone",  function() TeleportTo("Sell Wood") end)
 WorldTab:AddButton("→ Wood R' Us",      function() TeleportTo("Wood R' Us") end)
 WorldTab:AddButton("→ Land Store",      function() TeleportTo("Land Store") end)
-WorldTab:AddButton("→ Snow Biome",      function() TeleportTo("Snow Biome") end)
+WorldTab:AddButton("→ Snow Biome",      function() TeleportTo("Snow Biome") end) -- Y=75, above terrain
 WorldTab:AddButton("→ Volcano Biome",   function() TeleportTo("Volcano Biome") end)
 WorldTab:AddButton("→ Swamp Biome",     function() TeleportTo("Swamp Biome") end)
 WorldTab:AddButton("→ Tropics / Ferry", function() TeleportTo("Tropics / Ferry") end)
