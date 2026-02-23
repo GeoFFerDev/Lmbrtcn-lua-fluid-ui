@@ -6,25 +6,413 @@
      ███████╗    ██║   ███████╗     ███████╗██╔╝ ██╗██║     ███████╗╚██████╔╝██║   ██║
      ╚══════╝    ╚═╝   ╚══════╝     ╚══════╝╚═╝  ╚═╝╚═╝     ╚══════╝ ╚═════╝ ╚═╝   ╚═╝
 
-    Lumber Tycoon 2  |  Joffer Hub UI + Fixed v4.0 Logic Merge
+    Lumber Tycoon 2  |  Joffer Hub UI + Ancestor Logic Merge
 --]]
 
--- ─────────────────────────────────────────────────────────────────
--- SERVICES
--- ─────────────────────────────────────────────────────────────────
-local Players           = game:GetService("Players")
-local TweenService      = game:GetService("TweenService")
-local UserInputService  = game:GetService("UserInputService")
-local RunService        = game:GetService("RunService")
-local Workspace         = game:GetService("Workspace")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local Lighting          = game:GetService("Lighting")
+local Executor = identifyexecutor and identifyexecutor() or "Unknown"
+getgenv().Ancestor_Loaded = false
 
-local LP    = Players.LocalPlayer
-local Mouse = LP:GetMouse()
+repeat task.wait() until game:IsLoaded() and game.Players.LocalPlayer and game.Players.LocalPlayer:FindFirstChild('PlayerGui')
 
 -- ─────────────────────────────────────────────────────────────────
--- THEME (From v11)
+-- ANCESTOR CORE INITIALIZATION
+-- ─────────────────────────────────────────────────────────────────
+local Maid, Ancestor, GUISettings, Connections = loadstring(game:HttpGetAsync('https://raw.githubusercontent.com/KhayneGleave/Ancestor/main/Maid.txt'))(), {
+    SelectedTreeType             = 'Generic',
+    BringTreeAmount              = 1,
+    AutobuyAmount                = 1,
+    AutobuySelectedItem          = 'Basic Hatchet',
+    BringTreeSelectedPosition    = 'Current Position',
+    RotatingObject               = false,
+    Sprinting                    = false,
+    ModerationType               = 'Vehicle',
+    ModerationAction             = 'Kill',
+    InventoryDuplicationAmount   = 1,
+    PropertyToDuplicate          = 1,
+    PlayerToDuplicatePropertyTo  = game.Players:GetPlayers()[1],
+    ModWoodSawmill               = nil,
+    AutofarmTrees                = false,
+    CharacterGodMode             = 'FirstTimeExecutionProtection',
+    IsClientFlying               = false,
+    TreeToDismember              = false,
+    SelectedVehicleColourToSpawn = 'Dark red',
+    CurrentlySavingOrLoading     = nil,
+    DonatingProperty             = false,
+    SpawnItemsAmount             = 1,
+    SpawnItemName                = 'BasicHatchet',
+    ModdingWood                  = false
+}, {
+    WalkSpeed                          = 16,
+    JumpPower                          = 50,
+    HipHeight                          = 0,
+    SprintSpeed                        = 20,
+    FOV                                = 70,
+    InfiniteJump                       = false,
+    SelectedDropType                   = 'Both',
+    Light                              = false,
+    SprintKey                          = 'LeftShift',
+    NoclipKey                          = 'LeftControl',
+    KeyTP                              = 'G',
+    FastCheckout                       = false,
+    FixCashierRange                    = false,
+    HardDragger                        = false,
+    AxeRangeActive                     = false,
+    AxeSwingActive                     = false,
+    FlyKey                             = 'F',
+    WaterWalk                          = false,
+    WaterFloat                         = true,
+    FlySprintSpeed                     = 10,
+    AlwaysDay                          = false,
+    AlwaysNight                        = false,
+    NoFog                              = false,
+    AxeSwing                           = 0,
+    AxeRange                           = 0,
+    FlySpeed                           = 200,
+    CarSpeed                           = 1,
+    CarPitch                           = 1,
+    AntiAFK                            = (Executor ~= 'Krnl' and true) or false,
+    TreesEnabled                       = true,
+    StopPlayersLoading                 = false,
+    SignDuplicationAmount              = 1,
+    TeleportBackAfterBringTree         = true,
+    FastRotate                         = false,
+    XRotate                            = 1,
+    YRotate                            = 1,
+    SelectedTreeTypeSize               = 'Largest',
+    ActivateVehicleModifications       = true,
+    AutoSaveGUIConfiguration           = true,
+    Brightness                         = 1,
+    GlobalShadows                      = true,
+    RejoinExecute                      = false,
+    UnboxItems                         = false,
+    FreeCamera                         = false,
+    WaterGodMode                       = false,
+    BetterGraphics                     = false,
+    DropToolsAfterInventoryDuplication = false,
+    InstantDropAxes                    = false,
+    ClickDelete                        = false,
+    SellPlankAfterMilling              = false,
+    AutoStopOnPinkVehicle              = false,
+    DeleteSpawnPadAfterVehicleSpawn    = false,
+    AutoChopTrees                      = false,
+    SitInAnyVehicle                    = false,
+    ClickToSell                        = false
+}, {}
+
+local Players, TeleportService, UIS, CoreGui, StarterGui, Lighting, RunService, ReplicatedStorage, HttpService, PerformanceStats, UserInputService, Terrain = game:GetService('Players'), game:GetService('TeleportService'), game:GetService('UserInputService'), game:GetService('CoreGui'), game:GetService('StarterGui'), game:GetService('Lighting'), game:GetService('RunService'), game:GetService('ReplicatedStorage'), game:GetService('HttpService'), game:GetService('Stats').PerformanceStats, game:GetService('UserInputService'), workspace.Terrain
+
+local Player = Players.LocalPlayer
+local Mouse = Player:GetMouse()
+getgenv().Character = Player.Character or Player.CharacterAdded:Wait()
+local PlayerGui, Camera = Player.PlayerGui, workspace.CurrentCamera
+
+local Properties, Stores, PlayerModels = Workspace.Properties:GetChildren(), Workspace.Stores:GetChildren(), Workspace.PlayerModels
+
+local NPCChattingClient = getsenv(PlayerGui.ChatGUI.NPCChattingClient)
+local CharacterFloat = getsenv(PlayerGui.Scripts.CharacterFloat)
+local PropertyPurchasingClient = getsenv(PlayerGui.PropertyPurchasingGUI.PropertyPurchasingClient)
+local LoadSaveClient = getsenv(PlayerGui.LoadSaveGUI.LoadSaveClient)
+local UserInput = getsenv(PlayerGui.Scripts.UserInput)
+local SettingsClient = getsenv(PlayerGui.SettingsGUI.SettingsClient)
+local InteractionPermission = require(ReplicatedStorage.Interaction.InteractionPermission)
+
+local RequestLoad = ReplicatedStorage.LoadSaveRequests.RequestLoad
+local RequestSave = ReplicatedStorage.LoadSaveRequests.RequestSave
+local GetMetaData = ReplicatedStorage.LoadSaveRequests.GetMetaData
+local ClientMayLoad = ReplicatedStorage.LoadSaveRequests.ClientMayLoad
+local SendUserNotice = ReplicatedStorage.Notices.SendUserNotice
+local ClientGetUserPermissions = ReplicatedStorage.Interaction.ClientGetUserPermissions
+local ClientExpandedProperty = ReplicatedStorage.PropertyPurchasing.ClientExpandedProperty
+local ClientPurchasedProperty = ReplicatedStorage.PropertyPurchasing.ClientPurchasedProperty
+local ClientInteracted = ReplicatedStorage.Interaction.ClientInteracted
+local ClientIsDragging = ReplicatedStorage.Interaction.ClientIsDragging
+local RemoteProxy = ReplicatedStorage.Interaction.RemoteProxy
+local PromptChat = ReplicatedStorage.NPCDialog.PromptChat
+local PlayerChatted = ReplicatedStorage.NPCDialog.PlayerChatted
+local SetChattingValue = ReplicatedStorage.NPCDialog.SetChattingValue
+local TestPing = ReplicatedStorage.TestPing
+local UpdateUserSettings = ReplicatedStorage.Interaction.UpdateUserSettings
+local ClientPlacedStructure = ReplicatedStorage.PlaceStructure.ClientPlacedStructure
+local SelectLoadPlot = ReplicatedStorage.PropertyPurchasing.SelectLoadPlot
+local ClientPlacedBlueprint = ReplicatedStorage.PlaceStructure.ClientPlacedBlueprint
+local DestroyStructure = ReplicatedStorage.Interaction.DestroyStructure
+
+local LoadPass = getupvalue(LoadSaveClient.saveSlot, 12)
+local AxeFolder, LogModels, ClientItemInfo, Util = ReplicatedStorage.AxeClasses, workspace.LogModels, ReplicatedStorage.ClientItemInfo, ReplicatedStorage:WaitForChild('Util', 10) 
+local TransientFunctionCache = require(Util:WaitForChild('TransientFunctionCache', 10))
+
+local VehicleColours = {'Dark red','Sand red','Sand yellow metalic','Lemon metalic','Gun metalic','Earth orange','Earth yellow','Brick yellow','Rust','Really black','Faded green','Sand green','Black metalic','Dark grey metallic','Dark grey','Silver','Medium stone grey','Mid grey', 'Hot pink'}
+
+if not getgenv().UserCanInteract then
+    getgenv().CharacterFloatOld = CharacterFloat.isInWater
+    getgenv().UserCanInteract = InteractionPermission.UserCanInteract
+    getgenv().BetterGraphicsEnabled = false
+end
+
+getgenv().LoadedTrees = {
+    ['Update'] = function(_, Tree)
+        LoadedTrees[#LoadedTrees + 1] = {Parent = Tree.Parent, Model = Tree}
+        Tree.Parent = (GUISettings.TreesEnabled and Tree.Parent) or Lighting
+    end
+}
+
+local CashiersAutobuy = {}
+local CashierIDConnection = PromptChat.OnClientEvent:Connect(function(_, Cashier)
+    if CashiersAutobuy[Cashier.Name] == nil then
+        CashiersAutobuy[Cashier.Name] = Cashier.ID
+    end
+end)
+
+Maid.Threads:Create(function()  
+    SetChattingValue:InvokeServer(1)
+    repeat Maid.Timer:Wait() until CashiersAutobuy['Hoover'] ~= nil
+    CashierIDConnection:Disconnect()
+    CashierIDConnection = nil
+    SetChattingValue:InvokeServer(0)
+end)
+
+function Ancestor:DropTool(Axe)
+    ClientInteracted:FireServer(Axe, 'Drop tool',Player.Character.PrimaryPart.CFrame)
+end
+
+function Ancestor:DropTools()
+    Player.Character.Humanoid:UnequipTools()
+    if GUISettings.InstantDropAxes then 
+        Player.Character.Humanoid.Health = 0
+        return
+    end
+    local Axes = self:GetAxes()
+    for i = 1, #Axes do 
+        self:DropTool(Axes[i])
+        Maid.Timer:Wait(.125)
+    end
+end
+
+function Ancestor:SellSigns()
+    self:BringAll('PropertySoldSign', CFrame.new(315, 3, 85))
+end
+
+function Ancestor:CheckClientPrivilege(Player, Privilege)
+    return TransientFunctionCache:New(function(...)
+        return ClientGetUserPermissions:InvokeServer(...)
+    end, 1, {ReturnOldResultInsteadOfYielding = true}).Callback(Player, Privilege)
+end
+
+function Ancestor:ApplyLight()
+    if Player.Character.Head:FindFirstChild('PointLight') then
+        return Player.Character.Head.PointLight:Destroy()
+    end
+    if not GUISettings.Light then return end
+    local Light = Instance.new('PointLight', Player.Character.Head)
+    Light.Range, Light.Brightness = 150, 1.7
+end
+
+function Ancestor:SetAxeRange(Active, Value)
+    local Tool = Player.Character:FindFirstChildOfClass('Tool')
+    if not Tool then return end
+    local AttemptChop = getconnections(Tool.Activated)[1].Function
+    local OldStats = getupvalues(AttemptChop)
+    local NewStats = OldStats[1]
+    NewStats.Range = (Active and Value) or require(AxeFolder:FindFirstChild('AxeClass_'..tostring(Tool.ToolName.Value))).new().Range
+    setupvalue(AttemptChop, 1, NewStats)
+end
+
+function Ancestor:SetSwingCooldown(Active)
+    local Tool = Player.Character:FindFirstChildOfClass('Tool')
+    if not Tool then return end
+    local AttemptChop = getconnections(Tool.Activated)[1].Function
+    local OldStats = getupvalues(AttemptChop)
+    local NewStats = OldStats[1]
+    local Cooldown = require(AxeFolder:FindFirstChild('AxeClass_'..tostring(Tool.ToolName.Value))).new().SwingCooldown
+    NewStats.SwingCooldown = (Active and Cooldown / 2) or Cooldown
+    setupvalue(AttemptChop, 1, NewStats)
+end
+
+function Ancestor:GetAxes()
+    local Axes = {}
+    local Tools = self:MergeTables(Player.Backpack:GetChildren(), Player.Character:GetChildren())
+    for i = 1, #Tools do
+        local Axe = Tools[i]
+        if Axe:FindFirstChild('CuttingTool') then
+            Axes[#Axes + 1] = Axe
+        end
+    end
+    return Axes
+end
+
+function Ancestor:MergeTables(Tbl, NewTbl)
+    for Index, Value in next, Tbl do NewTbl[#NewTbl + 1] = Value end
+    return NewTbl
+end
+
+function Ancestor:GetBestAxe()
+    local Axes, BestAxe, BestDamage, Damage = {}, nil, 0, nil
+    local Tools = self:MergeTables(Player.Backpack:GetChildren(),Player.Character:GetChildren())
+    for i = 1, #Tools do 
+        if Tools[i]:FindFirstChild('CuttingTool') then Axes[#Axes + 1] = Tools[i] end
+    end
+    for i = 1, #Axes do 
+        local Axe = Axes[i]
+        if Axe:FindFirstChild('ToolName') and AxeFolder:FindFirstChild('AxeClass_'..tostring(Axe.ToolName.Value)) then
+            if self.SelectedTreeType == 'LoneCave' and Axe.ToolName.Value == 'EndTimesAxe' then return Axe end
+            if self.SelectedTreeType == 'Volcano' and Axe.ToolName.Value == 'FireAxe' then return Axe end
+            if self.SelectedTreeType == 'CaveCrawler' and Axe.ToolName.Value == 'CaveAxe' then return Axe end
+            if self.SelectedTreeType == 'Frost' and Axe.ToolName.Value == 'IceAxe' then return Axe end
+            if self.SelectedTreeType == 'GoldSwampy' and Axe.ToolName.Value == 'AxeSwamp' then return Axe end
+            
+            local AxeStats = require(AxeFolder:FindFirstChild('AxeClass_'..tostring(Axe.ToolName.Value))).new()
+            if AxeStats.SpecialTrees and AxeStats.SpecialTrees[Ancestor.SelectedTreeType] then return Axe end
+            Damage = AxeStats.Damage
+            if Damage > BestDamage then BestDamage = Damage; BestAxe = Axe end
+        end
+    end
+    return BestAxe
+end
+
+function Ancestor:Teleport(CF)
+    repeat Maid.Timer:Wait() until Player.Character:FindFirstChild('HumanoidRootPart')
+    xpcall(function()
+        Player.Character.Humanoid.SeatPart.Parent:PivotTo(CF * CFrame.Angles(math.rad(Player.Character.Humanoid.SeatPart.Parent.PrimaryPart.Orientation.X), math.rad(Player.Character.Humanoid.SeatPart.Parent.PrimaryPart.Orientation.Y), math.rad(Player.Character.Humanoid.SeatPart.Parent.PrimaryPart.Orientation.Z)))
+    end, function()
+        Player.Character:PivotTo(CF)
+    end)
+end
+
+function Ancestor:GetHitPoint(Axe)
+    local AxeModule = require(AxeFolder['AxeClass_'..tostring(Axe.ToolName.Value)]).new()
+    if self.SelectedTreeType == 'LoneCave' and Axe.ToolName.Value == 'EndTimesAxe' then return AxeModule.SpecialTrees.LoneCave.Damage end
+    if self.SelectedTreeType == 'Volcano' and Axe.ToolName.Value == 'FireAxe' then return AxeModule.SpecialTrees.Volcano.Damage end
+    return (AxeModule.SpecialTrees and AxeModule.SpecialTrees[self.SelectedTreeType] and AxeModule.SpecialTrees[self.SelectedTreeType].Damage) or AxeModule.Damage
+end
+
+function Ancestor:AttemptChop(Tree, Dismember)
+    local Axe = self:GetBestAxe()
+    if not Axe or not Tree or not Tree.Parent then return end
+    local Hitpoint, CutEvent = self:GetHitPoint(Axe), Tree.Parent:FindFirstChild('CutEvent') or Tree:FindFirstChild('CutEvent')
+    local WoodSections = tostring(Tree):match('WoodSection') and Tree.Parent:GetChildren() or Tree:GetChildren()
+    local LowestIndex = 9e9
+    local DismemberHeight
+    for i = 1, #WoodSections do 
+        local WoodSection = WoodSections[i]
+        if tostring(WoodSection):match('WoodSection') and WoodSection.ID.Value < LowestIndex then
+            LowestIndex = WoodSection.ID.Value
+            DismemberHeight = WoodSection.Size.Y
+        end
+    end
+    RemoteProxy:FireServer(CutEvent, {
+        ['tool'] = Axe,
+        ['faceVector'] = Vector3.new(1, 0, 0),
+        ['height'] = (Dismember and DismemberHeight) or .3,
+        ['sectionId'] = LowestIndex,
+        ['hitPoints'] = Hitpoint,
+        ['cooldown'] = .1,
+        ['cuttingClass'] = 'Axe'
+    })
+end
+
+function Ancestor:GetTree()
+    local Largest, Smallest, LargestTree, SmallestTree, LargestIndex, SmallestIndex = 0, 9e9, nil, nil, nil, nil
+    for i = 1, #LoadedTrees do
+        if LoadedTrees[i] ~= nil then
+            local Tree = LoadedTrees[i].Model
+            if Tree and Tree:FindFirstChild('WoodSection') and Tree:FindFirstChild('TreeClass') and Tree.TreeClass.Value == Ancestor.SelectedTreeType then
+                local Sections = Tree:GetChildren()
+                local OriginWoodSection
+                for j = 1, #Sections do 
+                    local WoodSection = Sections[j]
+                    if tostring(WoodSection):match('WoodSection') and WoodSection.ID.Value == 1 and WoodSection.Size.Y >= .6 then
+                        OriginWoodSection = WoodSection
+                    end
+                end
+                if OriginWoodSection then
+                    if GUISettings.SelectedTreeTypeSize == 'Largest' and #Tree:GetChildren() >= Largest then 
+                        Largest = #Tree:GetChildren()
+                        LargestTree = OriginWoodSection
+                        LargestIndex = i
+                    elseif GUISettings.SelectedTreeTypeSize == 'Smallest' and #Tree:GetChildren() <= Smallest then 
+                        Smallest = #Tree:GetChildren()
+                        SmallestTree = OriginWoodSection
+                        SmallestIndex = i
+                    end
+                end
+            end
+        end
+    end
+    local targetIndex = (GUISettings.SelectedTreeTypeSize == 'Largest' and LargestIndex) or SmallestIndex
+    if targetIndex then LoadedTrees[targetIndex] = nil end
+    return (GUISettings.SelectedTreeTypeSize == 'Largest' and LargestTree) or SmallestTree
+end
+
+function Ancestor:IsNetworkOwnerOfModel(Model)
+    if (Executor == 'Krnl' or Executor == 'Fluxus' or Executor == 'Valyse') then 
+        for i = 1, 4 do TestPing:InvokeServer() end
+        return true
+    end
+    local Children = Model:GetChildren()
+    for i = 1, #Children do 
+        if Children[i]:IsA('BasePart') and isnetworkowner(Children[i]) then return true end
+    end
+    return false
+end
+
+function Ancestor:BringTree()
+    local Tool = self:GetBestAxe()
+    if not Player.Character or Player.Character:FindFirstChild('Humanoid') and Player.Character:FindFirstChild('Humanoid').Health <= 0 then return end
+    if self.BringingTree then return SendUserNotice:Fire('You\'re Already Using This Feature!') end
+    if not Tool then return SendUserNotice:Fire(string.format('You Need An %s Axe To Use This Feature!', (self.SelectedTreeType == 'LoneCave' and 'EndTimes') or '')) end
+
+    local OldPos = (self.BringTreeSelectedPosition == 'Current Position' and Player.Character.HumanoidRootPart.CFrame) or (self.BringTreeSelectedPosition == 'Sell Point' and CFrame.new(315, 3, 85)) or (self.BringTreeSelectedPosition == 'Spawn' and CFrame.new(174, 15, 66))
+
+    for i = 1, self.BringTreeAmount do
+        self.BringingTree = true
+        local Tree = self:GetTree()
+        if not Tree then 
+            self.BringingTree = false
+            return SendUserNotice:Fire(string.format('There Are No %s Trees In This Server At The Moment!', self.SelectedTreeType))
+        end
+
+        Player.Character:SetPrimaryPartCFrame(CFrame.new(Tree.CFrame.p))
+        
+        local treeConn
+        treeConn = LogModels.ChildAdded:Connect(function(LogTree)
+            local Owner = LogTree:WaitForChild('Owner', 10)
+            if Owner and Owner.Value == Player then
+                if treeConn then treeConn:Disconnect() end
+                LogTree.PrimaryPart = LogTree:WaitForChild('WoodSection', 10)
+                for _ = 1, 25 do
+                    ClientIsDragging:FireServer(LogTree)
+                    LogTree:SetPrimaryPartCFrame(OldPos)
+                    Maid.Timer:Wait()
+                end
+                repeat Maid.Timer:Wait() until self:IsNetworkOwnerOfModel(LogTree)
+                for _ = 1, 25 do
+                    ClientIsDragging:FireServer(LogTree)
+                    LogTree:SetPrimaryPartCFrame(OldPos)
+                    Maid.Timer:Wait()
+                end
+            end
+        end)
+
+        for _ = 1, 8 do TestPing:InvokeServer() end
+
+        repeat Maid.Timer:Wait()
+            self:AttemptChop(Tree)
+            Player.Character.PrimaryPart.Anchored = not Player.Character.PrimaryPart.Anchored
+            GUISettings.Noclip = true
+        until not self:GetBestAxe()
+
+        self.BringingTree = false
+        Player.Character.PrimaryPart.Anchored = false
+        GUISettings.Noclip = false
+    end
+
+    if GUISettings.TeleportBackAfterBringTree then 
+        Player.Character:PivotTo(OldPos)
+    end
+end
+
+-- ─────────────────────────────────────────────────────────────────
+-- JOFFER HUB UI THEME & SETUP
 -- ─────────────────────────────────────────────────────────────────
 local T = {
     WindowBG     = Color3.fromRGB(16,  20,  30),
@@ -46,13 +434,10 @@ local T = {
     SmallCorner  = UDim.new(0, 5),
     SidebarW     = 110,
     RowH         = 32,
-    WinW         = 340,
-    WinH         = 260,
+    WinW         = 450,
+    WinH         = 320,
 }
 
--- ─────────────────────────────────────────────────────────────────
--- HELPERS
--- ─────────────────────────────────────────────────────────────────
 local function New(cls, props, ch)
     local i = Instance.new(cls)
     for k, v in pairs(props or {}) do if k ~= "Parent" then i[k] = v end end
@@ -82,14 +467,10 @@ local function Tw(o,p)  TweenService:Create(o,TI,p):Play() end
 local function TwF(o,p) TweenService:Create(o,TIF,p):Play() end
 local function TwS(o,p) TweenService:Create(o,TIS,p):Play() end
 
--- ─────────────────────────────────────────────────────────────────
--- DRAG HELPER
--- ─────────────────────────────────────────────────────────────────
 local function MakeDraggable(handle, target)
     local dragging, dragStart, startPos = false, nil, nil
     handle.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging=true; dragStart=input.Position; startPos=target.Position
             input.Changed:Connect(function()
                 if input.UserInputState == Enum.UserInputState.End then dragging=false end
@@ -97,25 +478,18 @@ local function MakeDraggable(handle, target)
         end
     end)
     UserInputService.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
-        or input.UserInputType == Enum.UserInputType.Touch) then
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
             local d = input.Position - dragStart
-            target.Position = UDim2.new(
-                startPos.X.Scale, startPos.X.Offset+d.X,
-                startPos.Y.Scale, startPos.Y.Offset+d.Y
-            )
+            target.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset+d.X, startPos.Y.Scale, startPos.Y.Offset+d.Y)
         end
     end)
 end
 
--- ─────────────────────────────────────────────────────────────────
--- DESTROY OLD
--- ─────────────────────────────────────────────────────────────────
 pcall(function()
     for _, parent in ipairs({
         (typeof(gethui)=="function" and gethui()) or false,
         game:GetService("CoreGui"),
-        LP:FindFirstChild("PlayerGui"),
+        Player:FindFirstChild("PlayerGui"),
     }) do
         if parent then
             local old = parent:FindFirstChild("JofferHub")
@@ -124,24 +498,14 @@ pcall(function()
     end
 end)
 
--- ─────────────────────────────────────────────────────────────────
--- SCREEN GUI
--- ─────────────────────────────────────────────────────────────────
-local guiParent
-pcall(function()
-    if gethui then guiParent = gethui()
-    else guiParent = game:GetService("CoreGui") end
-end)
-if not guiParent then guiParent = LP:FindFirstChild("PlayerGui") or LP:WaitForChild("PlayerGui") end
+local guiParent = gethui and gethui() or game:GetService("CoreGui")
+if not pcall(function() local _ = guiParent.Name end) then guiParent = Player:WaitForChild("PlayerGui") end
 
 local ScreenGui = New("ScreenGui", {
     Name="JofferHub", ResetOnSpawn=false, ZIndexBehavior=Enum.ZIndexBehavior.Sibling,
     IgnoreGuiInset=true, DisplayOrder=999, Parent=guiParent,
 })
 
--- ─────────────────────────────────────────────────────────────────
--- FLOATING ICON
--- ─────────────────────────────────────────────────────────────────
 local Icon = New("Frame", {
     Name="FloatIcon", Size=UDim2.new(0,56,0,56), Position=UDim2.new(0,18,0.5,-28),
     BackgroundColor3=T.SidebarBG, BorderSizePixel=0, Visible=false, ZIndex=20, Parent=ScreenGui,
@@ -157,9 +521,6 @@ New("TextLabel", {
 })
 MakeDraggable(Icon, Icon)
 
--- ─────────────────────────────────────────────────────────────────
--- MAIN WINDOW
--- ─────────────────────────────────────────────────────────────────
 local Main = New("Frame", {
     Name="Main", Size=UDim2.new(0,T.WinW,0,T.WinH), Position=UDim2.new(0.5,-T.WinW/2,0.1,20),
     BackgroundColor3=T.WindowBG, BorderSizePixel=0, ClipsDescendants=true, ZIndex=5, Parent=ScreenGui,
@@ -171,7 +532,7 @@ New("Frame", {Size=UDim2.new(1,0,0,1), Position=UDim2.new(0,0,1,-1), BackgroundC
 local dot = New("Frame", {Size=UDim2.new(0,7,0,7), Position=UDim2.new(0,12,0.5,-3), BackgroundColor3=T.Accent, BorderSizePixel=0, ZIndex=7, Parent=TBar})
 Corner(dot, UDim.new(1,0))
 New("TextLabel", {Text="LT2 Exploit", Size=UDim2.new(0,120,1,0), Position=UDim2.new(0,26,0,0), BackgroundTransparency=1, Font=Enum.Font.GothamBold, TextSize=14, TextColor3=T.TextPri, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7, Parent=TBar})
-New("TextLabel", {Text="Joffer Hub v11.0 UI  •  #13822889", Size=UDim2.new(0,200,1,0), Position=UDim2.new(0,152,0,0), BackgroundTransparency=1, Font=Enum.Font.Gotham, TextSize=10, TextColor3=T.Accent, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7, Parent=TBar})
+New("TextLabel", {Text="Joffer Hub UI + Ancestor V2 Logic", Size=UDim2.new(0,200,1,0), Position=UDim2.new(0,152,0,0), BackgroundTransparency=1, Font=Enum.Font.Gotham, TextSize=10, TextColor3=T.Accent, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7, Parent=TBar})
 MakeDraggable(TBar, Main)
 
 local CloseBtn = New("TextButton", {Text="✕", Size=UDim2.new(0,28,0,28), Position=UDim2.new(1,-34,0.5,-14), BackgroundColor3=Color3.fromRGB(185,55,55), BackgroundTransparency=0.35, Font=Enum.Font.GothamBold, TextSize=12, TextColor3=T.TextPri, BorderSizePixel=0, ZIndex=8, Parent=TBar})
@@ -205,20 +566,14 @@ local function ShowIcon()
     end)
 end
 MinBtn.MouseButton1Click:Connect(ShowIcon)
-MinBtn.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.Touch then ShowIcon() end end)
 IconBtn.MouseButton1Click:Connect(function() if minimized then ShowMain() end end)
-IconBtn.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.Touch and minimized then ShowMain() end end)
 CloseBtn.MouseButton1Click:Connect(function() ScreenGui:Destroy() end)
-CloseBtn.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.Touch then ScreenGui:Destroy() end end)
 UserInputService.InputBegan:Connect(function(input, gpe)
     if not gpe and input.KeyCode==Enum.KeyCode.RightControl then
         if minimized then ShowMain() else ShowIcon() end
     end
 end)
 
--- ─────────────────────────────────────────────────────────────────
--- TAB + COMPONENT FACTORY
--- ─────────────────────────────────────────────────────────────────
 local Tabs = {}
 local ActiveTab = nil
 
@@ -269,9 +624,6 @@ local function CreateTab(name, icon)
             if cb then pcall(cb,state) end
         end
         New("TextButton",{Size=UDim2.new(1,0,1,0),BackgroundTransparency=1,Text="",Parent=row}).MouseButton1Click:Connect(function() Set(not state) end)
-        row.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.Touch then Set(not state) end end)
-        row.MouseEnter:Connect(function() Tw(row,{BackgroundColor3=T.ElementHover}) end)
-        row.MouseLeave:Connect(function() Tw(row,{BackgroundColor3=T.ElementBG}) end)
         return {Set=Set, Get=function() return state end}
     end
 
@@ -291,23 +643,19 @@ local function CreateTab(name, icon)
         end
         local dragging=false
         local function drag(pos) local rel=math.clamp((pos.X-track.AbsolutePosition.X)/track.AbsoluteSize.X,0,1); SetVal(mn+rel*(mx-mn)) end
-        track.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dragging=true; drag(i.Position) end end)
-        UserInputService.InputChanged:Connect(function(i) if dragging and (i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch) then drag(i.Position) end end)
-        UserInputService.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then dragging=false end end)
+        track.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=true; drag(i.Position) end end)
+        UserInputService.InputChanged:Connect(function(i) if dragging and i.UserInputType==Enum.UserInputType.MouseMovement then drag(i.Position) end end)
+        UserInputService.InputEnded:Connect(function(i) if i.UserInputType==Enum.UserInputType.MouseButton1 then dragging=false end end)
         return {Set=SetVal, Get=function() return val end}
     end
 
     function Tab:AddButton(text, cb)
         local btn2=New("TextButton",{Size=UDim2.new(1,0,0,T.RowH),BackgroundColor3=T.ElementBG,Font=Enum.Font.GothamBold,TextSize=12,TextColor3=T.Accent,Text=text,BorderSizePixel=0,Parent=page})
         Corner(btn2); Stroke(btn2,T.AccentDim,1)
-        btn2.MouseEnter:Connect(function() Tw(btn2,{BackgroundColor3=T.ElementHover}) end)
-        btn2.MouseLeave:Connect(function() Tw(btn2,{BackgroundColor3=T.ElementBG}) end)
-        local function fire()
+        btn2.MouseButton1Click:Connect(function()
             Tw(btn2,{BackgroundColor3=T.AccentDim}); task.delay(0.14,function() Tw(btn2,{BackgroundColor3=T.ElementBG}) end)
             if cb then pcall(cb) end
-        end
-        btn2.MouseButton1Click:Connect(fire)
-        btn2.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.Touch then fire() end end)
+        end)
         return btn2
     end
 
@@ -330,16 +678,8 @@ local function CreateTab(name, icon)
         end
         for _,opt in ipairs(options) do
             local ib=New("TextButton",{Size=UDim2.new(1,0,0,30),BackgroundColor3=T.ElementBG,BackgroundTransparency=1,Font=Enum.Font.Gotham,TextSize=11,TextColor3=T.TextSec,Text=opt,TextXAlignment=Enum.TextXAlignment.Left,BorderSizePixel=0,ZIndex=52,Parent=itemFrame}); Pad(ib,0,0,8,4); Corner(ib,T.SmallCorner)
-            ib.MouseEnter:Connect(function() Tw(ib,{BackgroundTransparency=0.6,TextColor3=T.TextPri}) end)
-            ib.MouseLeave:Connect(function() Tw(ib,{BackgroundTransparency=1,TextColor3=T.TextSec}) end)
             local function pick() current=opt; valLbl.Text=opt; closeDD(); if cb then pcall(cb,opt) end end
             ib.MouseButton1Click:Connect(pick)
-            ib.InputBegan:Connect(function(i)
-                if i.UserInputType~=Enum.UserInputType.Touch then return end
-                local startPos=i.Position; local maxDelta=0
-                local mc=UserInputService.InputChanged:Connect(function(mi) if mi.UserInputType==Enum.UserInputType.Touch then maxDelta=math.max(maxDelta,(mi.Position-startPos).Magnitude) end end)
-                local ec; ec=UserInputService.InputEnded:Connect(function(ei) if ei.UserInputType==Enum.UserInputType.Touch then mc:Disconnect(); ec:Disconnect(); if maxDelta<20 then pick() end end end)
-            end)
         end
         local function toggle()
             open=not open
@@ -352,16 +692,13 @@ local function CreateTab(name, icon)
         end
         UserInputService.InputBegan:Connect(function(i)
             if not open then return end
-            if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+            if i.UserInputType==Enum.UserInputType.MouseButton1 then
                 local mp=i.Position; local ddPos=dd.AbsolutePosition; local ddSz=dd.AbsoluteSize
                 local hPos=header.AbsolutePosition; local hSz=header.AbsoluteSize
-                local inDD=mp.X>=ddPos.X and mp.X<=ddPos.X+ddSz.X and mp.Y>=ddPos.Y and mp.Y<=ddPos.Y+ddSz.Y
-                local inH=mp.X>=hPos.X and mp.X<=hPos.X+hSz.X and mp.Y>=hPos.Y and mp.Y<=hPos.Y+hSz.Y
-                if not inDD and not inH then closeDD() end
+                if not (mp.X>=ddPos.X and mp.X<=ddPos.X+ddSz.X and mp.Y>=ddPos.Y and mp.Y<=ddPos.Y+ddSz.Y) and not (mp.X>=hPos.X and mp.X<=hPos.X+hSz.X and mp.Y>=hPos.Y and mp.Y<=hPos.Y+hSz.Y) then closeDD() end
             end
         end)
         header.MouseButton1Click:Connect(toggle)
-        header.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.Touch then toggle() end end)
         return {Set=function(v) current=v; valLbl.Text=v end, Get=function() return current end}
     end
 
@@ -376,807 +713,135 @@ local function CreateTab(name, icon)
         page.Visible=true; indicator.Visible=true; Tw(btn,{BackgroundTransparency=0.82,TextColor3=T.TextPri}); ActiveTab=Tab
     end
     btn.MouseButton1Click:Connect(Activate)
-    btn.InputBegan:Connect(function(i) if i.UserInputType==Enum.UserInputType.Touch then Activate() end end)
-    btn.MouseEnter:Connect(function() if ActiveTab~=Tab then Tw(btn,{BackgroundTransparency=0.88}) end end)
-    btn.MouseLeave:Connect(function() if ActiveTab~=Tab then Tw(btn,{BackgroundTransparency=1}) end end)
     Tabs[name]=Tab; return Tab
 end
 
--- ═══════════════════════════════════════════════════════════════════
--- GAME LOGIC (Imported from v4.0)
--- ═══════════════════════════════════════════════════════════════════
+-- ─────────────────────────────────────────────────────────────────
+-- BUILD TABS
+-- ─────────────────────────────────────────────────────────────────
 
--- ── Remote resolvers ──────────────────────────────────────────────
-local _Interaction, _Transactions, _TransactionsC2S, _TransactionsS2C
-local _LoadSaveRequests, _PropertyPurchasing
-
-local function GetInteraction()
-    if not _Interaction then _Interaction = ReplicatedStorage:FindFirstChild("Interaction") end
-    return _Interaction
-end
-local function GetTransactionsC2S()
-    if not _TransactionsC2S then
-        local tr = ReplicatedStorage:FindFirstChild("Transactions")
-        if tr then _TransactionsC2S = tr:FindFirstChild("ClientToServer") end
-    end
-    return _TransactionsC2S
-end
-local function GetTransactionsS2C()
-    if not _TransactionsS2C then
-        local tr = ReplicatedStorage:FindFirstChild("Transactions")
-        if tr then _TransactionsS2C = tr:FindFirstChild("ServerToClient") end
-    end
-    return _TransactionsS2C
-end
-local function GetLoadSave()
-    if not _LoadSaveRequests then _LoadSaveRequests = ReplicatedStorage:FindFirstChild("LoadSaveRequests") end
-    return _LoadSaveRequests
-end
-local function GetPropertyPurchasing()
-    if not _PropertyPurchasing then _PropertyPurchasing = ReplicatedStorage:FindFirstChild("PropertyPurchasing") end
-    return _PropertyPurchasing
-end
-
--- ── Character helpers ─────────────────────────────────────────────
-local function GetChar() return LP.Character end
-local function GetHRP()  local c = GetChar(); return c and c:FindFirstChild("HumanoidRootPart") end
-local function GetHum()  local c = GetChar(); return c and c:FindFirstChildOfClass("Humanoid") end
-
--- ── Flags ─────────────────────────────────────────────────────────
-local Flags = {
-    Fly=false, Noclip=false, AutoChop=false, AutoSell=false,
-    InfJump=false, SpeedVal=16, JumpVal=50, FlySpeed=50,
-    AlwaysDay=false, AlwaysNight=false,
-    SelWood="Any", GetTreeAmt=10,
-    AutoBuyRunning=false, AutBuyItem="Rukiryaxe",
-}
-
-LP.CharacterAdded:Connect(function(c)
-    task.wait(1)
-    local h = c:FindFirstChildOfClass("Humanoid")
-    if h then h.WalkSpeed = Flags.SpeedVal; h.JumpPower = Flags.JumpVal end
-end)
-
-local function SafeTeleport(cf, retries)
-    retries = retries or 3
-    local hrp = GetHRP()
-    if not hrp then return end
-    for i = 1, retries do
-        pcall(function()
-            hrp.AssemblyLinearVelocity  = Vector3.zero
-            hrp.AssemblyAngularVelocity = Vector3.zero
-            hrp.CFrame = cf
-        end)
-        task.wait(0.1)
-        if (hrp.Position - cf.Position).Magnitude < 10 then break end
-    end
-end
-
--- ── WAYPOINTS ─────────────────────────────────────────────────────
-local Locations = {
-    ["Spawn"]             = CFrame.new(163,   5,   58),
-    ["Main Forest"]       = CFrame.new(300,  10, -200),
-    ["Wood Dropoff"]      = CFrame.new(322.5, 16,  97.1),
-    ["Sell Wood"]         = CFrame.new(258,    8,  66.1),
-    ["Wood R' Us"]        = CFrame.new(301.7, 19,  57.5),
-    ["Land Store"]        = CFrame.new(284.1, 14, -99.5),
-    ["Car Store"]         = CFrame.new(200,   12,   40),
-    ["Fancy Furnishings"] = CFrame.new(183,   12,   66),
-    ["Snow Biome"]        = CFrame.new(1093,  55, 1725),
-    ["Volcano Biome"]     = CFrame.new(163,   60, 1276),
-    ["Swamp Biome"]       = CFrame.new(-1137, 130, -996),
-    ["Tropics / Ferry"]   = CFrame.new(1294,  110, 2715),
-    ["Mountain"]          = CFrame.new(-400,   85,  300),
-}
-local function TeleportTo(name)
-    local cf = Locations[name]
-    if not cf then return end
-    SafeTeleport(cf)
-end
-
--- ── WOOD DETECTION ────────────────────────────────────────────────
-local function IsTreeModel(model)
-    if not model:IsA("Model") then return false end
-    local hasBE = false
-    local hasBP = false
-    for _, child in ipairs(model:GetChildren()) do
-        if child:IsA("BindableEvent") then hasBE = true end
-        if child:IsA("BasePart") then hasBP = true end
-    end
-    return hasBE and hasBP
-end
-
-local function GetCutEvent(model)
-    for _, child in ipairs(model:GetChildren()) do
-        if child:IsA("BindableEvent") then return child end
-    end
-end
-
-local function GetTreeClass(model)
-    for _, child in ipairs(model:GetDescendants()) do
-        if child:IsA("StringValue") then
-            local v = child.Value
-            if v and v ~= "" and (
-                v == "Oak" or v == "Birch" or v == "Walnut" or v == "Koa" or v == "Palm"
-                or v == "Pine" or v == "Fir" or v == "Frost" or v == "SnowGlow"
-                or v == "Spooky" or v == "SpookyNeon" or v == "Volcano" or v == "CaveCrawler"
-                or v == "LoneCave" or v == "GreenSwampy" or v == "GoldSwampy"
-                or v == "Cherry" or v == "BlueSpruce" or v == "Generic" or v == "Sign"
-            ) then
-                return v
-            end
-        end
-    end
-    return "Generic"
-end
-
-local function GetWoodPieces()
-    local list = {}
-    for _, v in ipairs(Workspace:GetDescendants()) do
-        if v:IsA("BasePart") then
-            local p = v.Parent
-            local parentIsWS = (p == Workspace)
-            local parentIsModel = p and p:IsA("Model")
-            local parentHasCutEvent = false
-            if parentIsModel then
-                for _, c in ipairs(p:GetChildren()) do
-                    if c:IsA("BindableEvent") then parentHasCutEvent = true; break end
-                end
-            end
-            if parentIsWS or (parentIsModel and not parentHasCutEvent) then
-                if v.Size.Magnitude > 1 then
-                    table.insert(list, v)
-                end
-            end
-        end
-    end
-    return list
-end
-
--- ── SELLING ───────────────────────────────────────────────────────
-local SELLWOOD_POS = Vector3.new(255.7, 3.9, 66.1)
-local SELLWOOD_SIZE = Vector3.new(0.2, 1.8, 5.4)
-
-local function SellWood()
-    local pieces = GetWoodPieces()
-    if #pieces == 0 then
-        warn("[LT2 Hub] No wood pieces found to sell.")
-        return
-    end
-    local n = 0
-    for i, part in ipairs(pieces) do
-        if n >= 200 then break end
-        pcall(function()
-            part.Parent = Workspace
-            part.AssemblyLinearVelocity  = Vector3.zero
-            part.AssemblyAngularVelocity = Vector3.zero
-            part.Anchored = true
-            local zi = (n % 5) * 1.0
-            local yi = math.floor(n / 5) * 0.3
-            part.CFrame = CFrame.new(
-                255.7,
-                3.9 + yi,
-                64.5 + zi
-            )
-        end)
-        n = n + 1
-    end
-    task.wait(0.6)
-    for i, part in ipairs(pieces) do
-        pcall(function()
-            if part and part.Parent then
-                part.Anchored = false
-                part.AssemblyLinearVelocity = Vector3.zero
-            end
-        end)
-    end
-end
-
--- ── TELEPORT WOOD ─────────────────────────────────────────────────
-local function TeleportWoodToMe()
-    local hrp = GetHRP()
-    if not hrp then return end
-    local pos = hrp.Position
-    local n = 0
-    local pieces = GetWoodPieces()
-    for _, part in ipairs(pieces) do
-        if n >= 200 then break end
-        pcall(function()
-            part.AssemblyLinearVelocity  = Vector3.zero
-            part.AssemblyAngularVelocity = Vector3.zero
-            part.Anchored = false
-            part.CFrame = CFrame.new(
-                pos.X + (n % 5) * 2.5 - 5,
-                pos.Y + 1.5,
-                pos.Z + math.floor(n / 5) * 2.5 - 5
-            )
-        end)
-        n = n + 1
-    end
-end
-
--- ── DUPE WOOD ─────────────────────────────────────────────────────
-local function DupeWood()
-    local targetBase = Vector3.new(310, 12, 97)
-    local moved = 0
-    for _, v in ipairs(Workspace:GetDescendants()) do
-        if moved >= 20 then break end
-        if IsTreeModel(v) then
-            pcall(function()
-                local offset = Vector3.new((moved % 4) * 8, 0, math.floor(moved / 4) * 8)
-                if v.PrimaryPart then
-                    v:SetPrimaryPartCFrame(CFrame.new(targetBase + offset))
-                else
-                    local bp = v:FindFirstChildWhichIsA("BasePart")
-                    if bp then
-                        bp.CFrame = CFrame.new(targetBase + offset)
-                    end
-                end
-            end)
-            moved = moved + 1
-        end
-    end
-    if moved == 0 then
-        warn("[LT2 Hub] No tree models found. Make sure trees are loaded near your base first.")
-    end
-end
-
--- ── AUTO CHOP ─────────────────────────────────────────────────────
-local autoChopConn
-local function StartAutoChop()
-    if autoChopConn then autoChopConn:Disconnect() end
-    autoChopConn = RunService.Heartbeat:Connect(function()
-        if not Flags.AutoChop then return end
-        local hrp = GetHRP()
-        if not hrp then return end
-
-        local nearest, nearestDist, nearestCE = nil, 200, nil
-        for _, v in ipairs(Workspace:GetDescendants()) do
-            if IsTreeModel(v) then
-                local tClass = GetTreeClass(v)
-                local typeMatch = (Flags.SelWood == "Any") or (tClass:lower() == Flags.SelWood:lower())
-                if typeMatch then
-                    local bp = v:FindFirstChildWhichIsA("BasePart")
-                    if bp then
-                        local d = (hrp.Position - bp.Position).Magnitude
-                        if d < nearestDist then
-                            nearest = v
-                            nearestDist = d
-                            nearestCE = GetCutEvent(v)
-                        end
-                    end
-                end
-            end
-        end
-
-        if nearest and nearestCE then
-            if nearestDist > 15 then
-                local bp = nearest:FindFirstChildWhichIsA("BasePart")
-                if bp then
-                    SafeTeleport(CFrame.new(bp.Position + Vector3.new(0, 5, 4)), 1)
-                end
-            end
-            pcall(function() nearestCE:Fire() end)
-        end
-    end)
-end
-local function StopAutoChop()
-    Flags.AutoChop = false
-    if autoChopConn then autoChopConn:Disconnect(); autoChopConn = nil end
-end
-
--- ── AUTO SELL LOOP ────────────────────────────────────────────────
-local autoSellThread
-local function StartAutoSell()
-    Flags.AutoSell = true
-    if autoSellThread then task.cancel(autoSellThread) end
-    autoSellThread = task.spawn(function()
-        while Flags.AutoSell do
-            SellWood()
-            task.wait(4)
-        end
-    end)
-end
-local function StopAutoSell()
-    Flags.AutoSell = false
-    if autoSellThread then task.cancel(autoSellThread); autoSellThread = nil end
-end
-
--- ── FUNDS ─────────────────────────────────────────────────────────
-local function GetFunds()
-    local c2s = GetTransactionsC2S()
-    if not c2s then return "?" end
-    local rf = c2s:FindFirstChild("GetFunds")
-    if rf and rf:IsA("RemoteFunction") then
-        local ok, v = pcall(function() return rf:InvokeServer() end)
-        if ok and v then return tostring(v) end
-    end
-    return "?"
-end
-
--- ── BUY AXE ───────────────────────────────────────────────────────
-local autoBuyThread
-local function BuyAxe(item)
-    SafeTeleport(CFrame.new(301.7, 19, 57.5))
-    task.wait(1.2)
-    local c2s = GetTransactionsC2S()
-    if c2s then
-        local rf = c2s:FindFirstChild("AttemptPurchase")
-        if rf and rf:IsA("RemoteFunction") then
-            local ok, result = pcall(function() return rf:InvokeServer(item) end)
-            if ok then
-                print("[LT2 Hub] Purchase result:", tostring(result))
-            end
-        end
-    end
-end
-local function StartAutoBuy(item, amount)
-    Flags.AutoBuyRunning = true
-    if autoBuyThread then task.cancel(autoBuyThread) end
-    autoBuyThread = task.spawn(function()
-        local done = 0
-        while Flags.AutoBuyRunning and done < amount do
-            BuyAxe(item); done = done + 1; task.wait(2)
-        end
-        Flags.AutoBuyRunning = false
-    end)
-end
-local function StopAutoBuy()
-    Flags.AutoBuyRunning = false
-    if autoBuyThread then task.cancel(autoBuyThread); autoBuyThread = nil end
-end
-
--- ── AXE DUPE ──────────────────────────────────────────────────────
-local axeDupeThread
-local function StartAxeDupe(waitTime, amount)
-    if axeDupeThread then task.cancel(axeDupeThread) end
-    axeDupeThread = task.spawn(function()
-        local count = 0
-        while count < amount do
-            local char = GetChar()
-            if not char then task.wait(1); continue end
-            local axe = LP.Backpack:FindFirstChildWhichIsA("Tool") or char:FindFirstChildWhichIsA("Tool")
-            if axe then
-                local h = GetHum()
-                if h then
-                    pcall(function() h:EquipTool(axe) end)
-                    task.wait(waitTime)
-                    pcall(function() h:UnequipTools() end)
-                    task.wait(waitTime)
-                end
-                count = count + 1
-            else
-                task.wait(0.5)
-            end
-        end
-    end)
-end
-
-local function DropAllAxes()
-    local char = GetChar(); if not char then return end
-    local hrp = GetHRP()
-    for _, tool in ipairs(LP.Backpack:GetChildren()) do
-        if tool:IsA("Tool") and tool.Name:lower():find("axe") then
-            tool.Parent = Workspace
-            if hrp then
-                pcall(function()
-                    local h = tool:FindFirstChild("Handle")
-                    if h then h.CFrame = hrp.CFrame * CFrame.new(math.random(-3,3), 1, math.random(-3,3)) end
-                end)
-            end
-        end
-    end
-    for _, tool in ipairs(char:GetChildren()) do
-        if tool:IsA("Tool") and tool.Name:lower():find("axe") then
-            tool.Parent = Workspace
-        end
-    end
-end
-
--- ── GRAB TOOLS ────────────────────────────────────────────────────
-local function GrabTools()
-    local hrp = GetHRP(); if not hrp then return end
-    for _, v in ipairs(Workspace:GetDescendants()) do
-        if v:IsA("Tool") and not v.Parent:IsA("Model") then
-            local h = v:FindFirstChild("Handle")
-            if h and (hrp.Position - h.Position).Magnitude < 30 then
-                pcall(function() v.Parent = LP.Backpack end)
-            end
-        end
-    end
-end
-
--- ── PLOT SYSTEM ───────────────────────────────────────────────────
-local function GetMyPlot()
-    local props = Workspace:FindFirstChild("Properties")
-    if not props then return nil end
-    for _, plot in ipairs(props:GetChildren()) do
-        local ow = plot:FindFirstChild("Owner")
-        if ow and ow.Value == LP then return plot end
-    end
-    return nil
-end
-
-local function BaseHelp()
-    local plot = GetMyPlot()
-    if not plot then
-        warn("[LT2 Hub] No owned plot found. Buy land first.")
-        return
-    end
-    for _, v in ipairs(plot:GetDescendants()) do
-        if v:IsA("BasePart") then
-            SafeTeleport(CFrame.new(v.Position + Vector3.new(0, 10, 0)))
-            return
-        end
-    end
-end
-
-local function FreeLand()
-    local props = Workspace:FindFirstChild("Properties")
-    if not props then return end
-    for _, plot in ipairs(props:GetChildren()) do
-        local ow = plot:FindFirstChild("Owner")
-        if ow and not ow.Value then
-            local origin = plot:FindFirstChild("OriginSquare") or plot:FindFirstChild("Square")
-            if origin and origin:IsA("BasePart") then
-                SafeTeleport(CFrame.new(origin.Position + Vector3.new(0, 10, 0)))
-                task.wait(0.8)
-                local pp = GetPropertyPurchasing()
-                if pp then
-                    local rf = pp:FindFirstChild("SelectLoadPlot")
-                    if rf and rf:IsA("RemoteFunction") then
-                        local ok, r = pcall(function() return rf:InvokeServer() end)
-                        print("[LT2 Hub] SelectLoadPlot result:", ok, tostring(r))
-                    end
-                end
-                return
-            end
-        end
-    end
-    warn("[LT2 Hub] No unclaimed plots found.")
-end
-
-local function ForceSave()
-    local ls = GetLoadSave()
-    if not ls then return end
-    local rf = ls:FindFirstChild("RequestSave")
-    if rf and rf:IsA("RemoteFunction") then
-        pcall(function() rf:InvokeServer() end)
-    end
-end
-
--- ── STEAL PLOT ────────────────────────────────────────────────────
-local function StealPlot(playerName)
-    local target = Players:FindFirstChild(playerName)
-    if not target then return end
-    local props = Workspace:FindFirstChild("Properties")
-    if not props then return end
-    for _, plot in ipairs(props:GetChildren()) do
-        local ow = plot:FindFirstChild("Owner")
-        if ow and ow.Value == target then
-            local origin = plot:FindFirstChild("OriginSquare") or plot:FindFirstChild("Square")
-            if origin and origin:IsA("BasePart") then
-                SafeTeleport(CFrame.new(origin.Position + Vector3.new(0, 5, 0)))
-                task.wait(0.8)
-                local pp = GetPropertyPurchasing()
-                if pp then
-                    local rf = pp:FindFirstChild("SelectLoadPlot")
-                    if rf and rf:IsA("RemoteFunction") then
-                        pcall(function() rf:InvokeServer() end)
-                    end
-                end
-            end
-            return
-        end
-    end
-end
-
--- ── MONEY DUPE ────────────────────────────────────────────────────
-local moneyDupeThread
-local Flags_MoneyDupe = false
-local function StartMoneyDupe()
-    Flags_MoneyDupe = true
-    if moneyDupeThread then task.cancel(moneyDupeThread) end
-    moneyDupeThread = task.spawn(function()
-        while Flags_MoneyDupe do
-            SellWood()
-            task.wait(4)
-        end
-    end)
-end
-local function StopMoneyDupe()
-    Flags_MoneyDupe = false
-    if moneyDupeThread then task.cancel(moneyDupeThread); moneyDupeThread = nil end
-end
-
--- ── FLY ───────────────────────────────────────────────────────────
-local flyConn, flyBV, flyBG
-local function StartFly()
-    local hrp = GetHRP(); if not hrp then return end
-    flyBV = Instance.new("BodyVelocity")
-    flyBV.MaxForce = Vector3.new(1e5, 1e5, 1e5)
-    flyBV.Velocity = Vector3.zero
-    flyBV.Parent = hrp
-    flyBG = Instance.new("BodyGyro")
-    flyBG.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
-    flyBG.CFrame = hrp.CFrame
-    flyBG.Parent = hrp
-    flyConn = RunService.Heartbeat:Connect(function()
-        if not Flags.Fly then return end
-        local h2 = GetHRP(); if not h2 then return end
-        local cam = Workspace.CurrentCamera
-        local dir = Vector3.zero
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then dir = dir + cam.CFrame.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then dir = dir - cam.CFrame.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then dir = dir - cam.CFrame.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then dir = dir + cam.CFrame.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then dir = dir + Vector3.new(0, 1, 0) end
-        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then dir = dir - Vector3.new(0, 1, 0) end
-        flyBV.Velocity = dir.Magnitude > 0 and dir.Unit * Flags.FlySpeed or Vector3.zero
-        flyBG.CFrame = cam.CFrame
-    end)
-end
-local function StopFly()
-    if flyConn then flyConn:Disconnect(); flyConn = nil end
-    if flyBV   then flyBV:Destroy(); flyBV = nil  end
-    if flyBG   then flyBG:Destroy(); flyBG = nil  end
-end
-
--- ── NOCLIP ────────────────────────────────────────────────────────
-local noclipConn
-local function SetNoclip(s)
-    if s then
-        noclipConn = RunService.Stepped:Connect(function()
-            local c = GetChar(); if not c then return end
-            for _, p in ipairs(c:GetDescendants()) do
-                if p:IsA("BasePart") then p.CanCollide = false end
-            end
-        end)
-    else
-        if noclipConn then noclipConn:Disconnect(); noclipConn = nil end
-        local c = GetChar()
-        if c then
-            for _, p in ipairs(c:GetDescendants()) do
-                if p:IsA("BasePart") then p.CanCollide = true end
-            end
-        end
-    end
-end
-
--- INFINITE JUMP
-UserInputService.JumpRequest:Connect(function()
-    if Flags.InfJump then
-        local h = GetHum()
-        if h then h:ChangeState(Enum.HumanoidStateType.Jumping) end
-    end
-end)
-
--- LIGHTING
-RunService.Heartbeat:Connect(function()
-    if Flags.AlwaysDay then Lighting.ClockTime = 14; Lighting.Brightness = 2
-    elseif Flags.AlwaysNight then Lighting.ClockTime = 0; Lighting.Brightness = 0.5 end
-end)
-
--- ═══════════════════════════════════════════════════════════════════
--- BUILD TABS (Imported from v4.0 to sync controls with logic)
--- ═══════════════════════════════════════════════════════════════════
-
--- PLAYER TAB
 local PlayerTab = CreateTab("Player","👤")
 PlayerTab:AddSection("Movement")
-PlayerTab:AddSlider("Walk Speed",{Min=1,Max=150,Default=16,Step=1},function(v)
-    Flags.SpeedVal=v; local h=GetHum(); if h then h.WalkSpeed=v end
-end)
-PlayerTab:AddSlider("Jump Power",{Min=0,Max=250,Default=50,Step=1},function(v)
-    Flags.JumpVal=v; local h=GetHum(); if h then h.JumpPower=v end
-end)
-PlayerTab:AddToggle("Infinite Jump",{Default=false},function(v) Flags.InfJump=v end)
-PlayerTab:AddToggle("Noclip",{Default=false},function(v) Flags.Noclip=v; SetNoclip(v) end)
-PlayerTab:AddSection("Flight")
-PlayerTab:AddSlider("Fly Speed",{Min=10,Max=300,Default=50,Step=5},function(v) Flags.FlySpeed=v end)
-PlayerTab:AddToggle("Fly  (WASD+Space/LShift)",{Default=false},function(v)
-    Flags.Fly=v; if v then StartFly() else StopFly() end
-end)
+PlayerTab:AddSlider("Walk Speed", {Min=16, Max=400, Default=GUISettings.WalkSpeed}, function(v) GUISettings.WalkSpeed = v end)
+PlayerTab:AddSlider("Jump Power", {Min=50, Max=400, Default=GUISettings.JumpPower}, function(v) GUISettings.JumpPower = v end)
+PlayerTab:AddToggle("Infinite Jump", {Default=GUISettings.InfiniteJump}, function(v) GUISettings.InfiniteJump = v end)
+PlayerTab:AddToggle("Noclip", {Default=GUISettings.Noclip}, function(v) GUISettings.Noclip = v end)
 PlayerTab:AddSection("Misc")
-PlayerTab:AddButton("Reset Character",function() local h=GetHum(); if h then h.Health=0 end end)
-PlayerTab:AddButton("Grab Nearby Tools", GrabTools)
-local fundsLbl = PlayerTab:AddLabel("Funds: press button below")
-PlayerTab:AddButton("Refresh Funds",function()
-    fundsLbl:Set("Funds: $"..GetFunds())
+PlayerTab:AddToggle("Anti-AFK", {Default=GUISettings.AntiAFK}, function(v) GUISettings.AntiAFK = v end)
+PlayerTab:AddButton("BTools", function() Ancestor:BTools() end)
+PlayerTab:AddButton("Safe Suicide", function() Ancestor:SafeSuicide() end)
+
+local TeleportTab = CreateTab("Teleports","🌍")
+TeleportTab:AddSection("Quick Teleports")
+local locs = {'Spawn', 'Wood R Us', 'Land Store', 'Bridge', 'Dock', 'Palm', 'Cave', 'The Den', 'Volcano', 'Swamp', 'Fancy Furnishings', 'Boxed Cars', 'Links Logic', 'Bobs Shack', 'Fine Arts Store', 'Ice Mountain', 'Shrine Of Sight', 'Strange Man', 'Volcano Win', 'Ski Lodge', 'Fur Wood'}
+local LocationsCFrames = {
+    ['Wood R Us']         = CFrame.new(270, 4, 60),
+    ['Spawn']             = CFrame.new(174, 10.5, 66),
+    ['Land Store']        = CFrame.new(270, 3, -98),
+    ['Bridge']            = CFrame.new(112, 37, -892),
+    ['Dock']              = CFrame.new(1136, 0, -206),
+    ['Palm']              = CFrame.new(2614, -4, -34),
+    ['Cave']              = CFrame.new(3590, -177, 415),
+    ['Volcano']           = CFrame.new(-1588, 623, 1069),
+    ['Swamp']             = CFrame.new(-1216, 131, -822),
+    ['Fancy Furnishings'] = CFrame.new(486, 3, -1722),
+    ['Boxed Cars']        = CFrame.new(509, 3, -1458),
+    ['Ice Mountain']      = CFrame.new(1487, 415, 3259),
+    ['Links Logic']       = CFrame.new(4615, 7, -794),
+    ['Bobs Shack']        = CFrame.new(292, 8, -2544),
+    ['Fine Arts Store']   = CFrame.new(5217, -166, 721),
+    ['Shrine Of Sight']   = CFrame.new(-1608, 195, 928),
+    ['Strange Man']       = CFrame.new(1071, 16, 1141),
+    ['Volcano Win']       = CFrame.new(-1667, 349, 147),
+    ['Ski Lodge']         = CFrame.new(1244, 59, 2290),
+    ['Fur Wood']          = CFrame.new(-1080, -5, -942),
+    ['The Den']           = CFrame.new(330, 45, 1943),
+}
+local locDropdown = TeleportTab:AddDropdown("Location", {Options=locs, Default='Spawn'})
+TeleportTab:AddButton("Teleport", function() Ancestor:Teleport(LocationsCFrames[locDropdown:Get()]) end)
+
+local allP = {}
+for _, p in ipairs(Players:GetPlayers()) do if p ~= Player then table.insert(allP, p.Name) end end
+if #allP == 0 then allP = {"(no other players)"} end
+TeleportTab:AddSection("Player Teleport")
+local plrDrop = TeleportTab:AddDropdown("Player", {Options=allP, Default=allP[1]})
+TeleportTab:AddButton("Teleport to Player", function()
+    local t = Players:FindFirstChild(plrDrop:Get())
+    if t and t.Character and t.Character:FindFirstChild("HumanoidRootPart") then
+        Ancestor:Teleport(CFrame.new(t.Character.HumanoidRootPart.Position + Vector3.new(0,5,0)))
+    end
 end)
 
--- SLOT TAB
-local SlotTab = CreateTab("Slot","🏠")
-SlotTab:AddSection("Base & Land")
-SlotTab:AddButton("Teleport → My Base", BaseHelp)
-SlotTab:AddButton("Claim Free Land", FreeLand)
-SlotTab:AddButton("Expand Land (Max)",function()
-    local pp = GetPropertyPurchasing(); if not pp then return end
-    local evt = pp:FindFirstChild("ClientExpandedProperty")
-    if evt and evt:IsA("RemoteEvent") then pcall(function() evt:FireServer() end) end
+local WorldTab = CreateTab("World","⚙")
+WorldTab:AddSection("Environment")
+WorldTab:AddToggle("Always Day", {Default=GUISettings.AlwaysDay}, function(v) GUISettings.AlwaysDay = v end)
+WorldTab:AddToggle("Always Night", {Default=GUISettings.AlwaysNight}, function(v) GUISettings.AlwaysNight = v end)
+WorldTab:AddToggle("No Fog", {Default=GUISettings.NoFog}, function(v) GUISettings.NoFog = v end)
+WorldTab:AddToggle("Global Shadows", {Default=GUISettings.GlobalShadows}, function(v) GUISettings.GlobalShadows = v end)
+WorldTab:AddSection("Water")
+WorldTab:AddToggle("Water Walk", {Default=GUISettings.WaterWalk}, function(v)
+    GUISettings.WaterWalk = v
+    for _, w in ipairs(workspace.Water:GetChildren()) do w.CanCollide = v end
 end)
-SlotTab:AddSection("Save & Clear")
-SlotTab:AddButton("Force Save", ForceSave)
-SlotTab:AddButton("Clear Plot (non-base)",function()
-    local plot = GetMyPlot(); if not plot then return end
-    for _, part in ipairs(plot:GetDescendants()) do
-        if part:IsA("BasePart") and part.Name ~= "Base" and part.Name ~= "Land" then
-            pcall(function() part:Destroy() end)
+
+local WoodTab = CreateTab("Trees","🌲")
+WoodTab:AddSection("Auto Chop / Bring")
+local treeTypes = {'Generic','GoldSwampy','CaveCrawler','Cherry','Frost','Volcano','Oak','Walnut','Birch','SnowGlow','Fir','Pine','GreenSwampy','Koa','Palm','Spooky','SpookyNeon','LoneCave'}
+WoodTab:AddDropdown("Tree Type", {Options=treeTypes, Default='Generic'}, function(v) Ancestor.SelectedTreeType = v end)
+WoodTab:AddSlider("Quantity", {Min=1, Max=10, Default=1}, function(v) Ancestor.BringTreeAmount = v end)
+WoodTab:AddButton("Bring Tree", function() Ancestor:BringTree() end)
+WoodTab:AddSection("Actions")
+WoodTab:AddButton("Sell Land Signs", function() Ancestor:SellSigns() end)
+
+local AxeTab = CreateTab("Axe/Item","⛏")
+AxeTab:AddSection("Axe Hacks")
+AxeTab:AddSlider("Axe Range", {Min=1, Max=400, Default=GUISettings.AxeRange}, function(v) GUISettings.AxeRange = v; if GUISettings.AxeRangeActive then Ancestor:SetAxeRange(true, v) end end)
+AxeTab:AddToggle("Activate Axe Range", {Default=GUISettings.AxeRangeActive}, function(v) GUISettings.AxeRangeActive = v; Ancestor:SetAxeRange(v, GUISettings.AxeRange) end)
+AxeTab:AddToggle("No Axe Cooldown", {Default=GUISettings.AxeSwingActive}, function(v) GUISettings.AxeSwingActive = v; Ancestor:SetSwingCooldown(v) end)
+AxeTab:AddSection("Item Dropping")
+AxeTab:AddToggle("Instant Drop (Respawn)", {Default=GUISettings.InstantDropAxes}, function(v) GUISettings.InstantDropAxes = v end)
+AxeTab:AddButton("Drop All Axes", function() Ancestor:DropTools() end)
+
+local CarTab = CreateTab("Vehicle","🚗")
+CarTab:AddSection("Modifications")
+CarTab:AddSlider("Car Speed", {Min=1, Max=5, Default=GUISettings.CarSpeed}, function(v) GUISettings.CarSpeed = v end)
+CarTab:AddSlider("Car Pitch", {Min=1, Max=10, Default=GUISettings.CarPitch}, function(v) GUISettings.CarPitch = v end)
+CarTab:AddToggle("Activate Vehicle Mods", {Default=GUISettings.ActivateVehicleModifications}, function(v) GUISettings.ActivateVehicleModifications = v end)
+
+-- ─────────────────────────────────────────────────────────────────
+-- BACKGROUND LOOPS (from Ancestor)
+-- ─────────────────────────────────────────────────────────────────
+RunService.Stepped:Connect(function()
+    if UIS:IsKeyDown(Enum.KeyCode[GUISettings.SprintKey]) then
+        Player.Character.Humanoid.WalkSpeed = GUISettings.WalkSpeed + GUISettings.SprintSpeed
+    else
+        Player.Character.Humanoid.WalkSpeed = GUISettings.WalkSpeed
+    end
+
+    if GUISettings.Noclip then
+        for _, p in ipairs(Player.Character:GetChildren()) do
+            if p:IsA('BasePart') then p.CanCollide = false end
         end
     end
-end)
-SlotTab:AddSection("Steal Plot")
-local stealOpts = {}
-for _, p in ipairs(Players:GetPlayers()) do
-    if p ~= LP then table.insert(stealOpts, p.Name) end
-end
-if #stealOpts == 0 then stealOpts = {"(no other players)"} end
-local stealDrop = SlotTab:AddDropdown("Target Player",{Options=stealOpts,Default=stealOpts[1]})
-SlotTab:AddButton("Steal Plot",function() StealPlot(stealDrop:Get()) end)
 
--- WORLD TAB
-local WorldTab = CreateTab("World","🌍")
-WorldTab:AddSection("Lighting")
-WorldTab:AddToggle("Always Day",{Default=false},function(v)
-    Flags.AlwaysDay=v; Flags.AlwaysNight=false
-    if v then Lighting.FogEnd=100000 end
-end)
-WorldTab:AddToggle("Always Night",{Default=false},function(v)
-    Flags.AlwaysNight=v; Flags.AlwaysDay=false
-end)
-WorldTab:AddToggle("No Fog",{Default=false},function(v)
-    if v then Lighting.FogEnd=100000; Lighting.FogStart=99999
-    else Lighting.FogEnd=1000; Lighting.FogStart=0 end
-end)
-WorldTab:AddToggle("Shadows",{Default=true},function(v) Lighting.GlobalShadows=v end)
-WorldTab:AddSection("Teleport")
-local locOpts = {}; for name in pairs(Locations) do table.insert(locOpts, name) end
-local locDrop = WorldTab:AddDropdown("Select Location",{Options=locOpts,Default=locOpts[1]})
-WorldTab:AddButton("Teleport ▶",function() TeleportTo(locDrop:Get()) end)
-WorldTab:AddSection("Quick Teleport")
-WorldTab:AddButton("→ Wood Dropoff",    function() TeleportTo("Wood Dropoff") end)
-WorldTab:AddButton("→ Sell Wood Zone",  function() TeleportTo("Sell Wood") end)
-WorldTab:AddButton("→ Wood R' Us",      function() TeleportTo("Wood R' Us") end)
-WorldTab:AddButton("→ Land Store",      function() TeleportTo("Land Store") end)
-WorldTab:AddButton("→ Snow Biome",      function() TeleportTo("Snow Biome") end)
-WorldTab:AddButton("→ Volcano Biome",   function() TeleportTo("Volcano Biome") end)
-WorldTab:AddButton("→ Swamp Biome",     function() TeleportTo("Swamp Biome") end)
-WorldTab:AddButton("→ Tropics / Ferry", function() TeleportTo("Tropics / Ferry") end)
-WorldTab:AddSection("Teleport to Player")
-local allP = {}
-for _, p in ipairs(Players:GetPlayers()) do
-    if p ~= LP then table.insert(allP, p.Name) end
-end
-if #allP == 0 then allP = {"(no other players)"} end
-local tpPDrop = WorldTab:AddDropdown("Player",{Options=allP,Default=allP[1]})
-WorldTab:AddButton("Teleport to Player",function()
-    local tgt = Players:FindFirstChild(tpPDrop:Get())
-    if not tgt or not tgt.Character then return end
-    local root = tgt.Character:FindFirstChild("HumanoidRootPart")
-    if root then SafeTeleport(root.CFrame * CFrame.new(3, 0, 0)) end
+    Lighting.TimeOfDay = (GUISettings.AlwaysDay and '12:00:00') or (GUISettings.AlwaysNight and '2:00:00') or Lighting.TimeOfDay
+    Lighting.GlobalShadows = GUISettings.GlobalShadows
+    Lighting.FogEnd = (GUISettings.NoFog and 1000000) or Lighting.FogEnd
+
+    pcall(function()
+        Player.Character.Humanoid.JumpPower = GUISettings.JumpPower
+    end)
 end)
 
--- WOOD TAB
-local WoodTab = CreateTab("Wood","🪵")
-WoodTab:AddSection("Auto Chop")
-WoodTab:AddLabel("Trees auto-move near you when chopped")
-local woodTypes = {"Any","Generic","Oak","Birch","Walnut","Koa","Palm","Pine","Fir","Frost",
-    "SnowGlow","Spooky","SpookyNeon","Volcano","CaveCrawler","LoneCave","GreenSwampy",
-    "GoldSwampy","Cherry","BlueSpruce"}
-WoodTab:AddDropdown("Target Wood",{Options=woodTypes,Default="Any"},function(v) Flags.SelWood=v end)
-WoodTab:AddToggle("Auto Chop",{Default=false},function(v)
-    Flags.AutoChop=v
-    if v then StartAutoChop() else StopAutoChop() end
-end)
-WoodTab:AddToggle("Auto Sell Wood",{Default=false},function(v)
-    Flags.AutoSell=v
-    if v then StartAutoSell() else StopAutoSell() end
-end)
-WoodTab:AddSection("Actions")
-WoodTab:AddButton("Sell All Wood Now", SellWood)
-WoodTab:AddButton("Teleport Wood → Me", TeleportWoodToMe)
-WoodTab:AddButton("Move Trees → Dropoff", DupeWood)
-WoodTab:AddSection("Info")
-local treeLbl = WoodTab:AddLabel("Press Scan to count")
-WoodTab:AddButton("Scan Trees",function()
-    local n = 0
-    local w = 0
-    for _, v in ipairs(Workspace:GetDescendants()) do
-        if IsTreeModel(v) then n = n + 1 end
+UIS.JumpRequest:Connect(function()
+    if GUISettings.InfiniteJump then
+        Player.Character.Humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
     end
-    for _, p in ipairs(GetWoodPieces()) do w = w + 1 end
-    treeLbl:Set("Trees: "..n.."  |  Wood Pieces: "..w)
 end)
 
--- AUTO BUY TAB
-local BuyTab = CreateTab("Auto Buy","💰")
-BuyTab:AddSection("Quick Purchase")
-BuyTab:AddButton("Rukiryaxe  — $7,400", function() BuyAxe("Rukiryaxe") end)
-BuyTab:AddButton("BluesteelAxe",        function() BuyAxe("BluesteelAxe") end)
-BuyTab:AddButton("FireAxe",             function() BuyAxe("FireAxe") end)
-BuyTab:AddButton("IceAxe",              function() BuyAxe("IceAxe") end)
-BuyTab:AddButton("Basic Sawmill",       function() BuyAxe("BasicSawmill") end)
-BuyTab:AddSection("Auto Buy Loop")
-local shopItems = {"Rukiryaxe","BluesteelAxe","FireAxe","IceAxe","CaveAxe","RefinedAxe","SilverAxe","Sawmill","Box","Plank"}
-local buyItemDrop = BuyTab:AddDropdown("Item",{Options=shopItems,Default="Rukiryaxe"},function(v) Flags.AutBuyItem=v end)
-local buyAmtSlider = BuyTab:AddSlider("Amount",{Min=1,Max=99,Default=1,Step=1})
-BuyTab:AddToggle("Auto Buy Loop",{Default=false},function(v)
-    if v then StartAutoBuy(Flags.AutBuyItem, buyAmtSlider:Get()) else StopAutoBuy() end
-end)
-
--- DUPE TAB
-local DupeTab = CreateTab("Dupe","📦")
-DupeTab:AddSection("Wood Dupe")
-DupeTab:AddLabel("Moves trees to dropoff → auto-chop there")
-DupeTab:AddButton("Move Trees → Dropoff", DupeWood)
-DupeTab:AddButton("Sell Current Wood",    SellWood)
-DupeTab:AddSection("Axe Dupe")
-local dupeWaitSlider = DupeTab:AddSlider("Wait (×0.1s)",{Min=1,Max=30,Default=5,Step=1})
-local dupeAmtSlider  = DupeTab:AddSlider("Amount",{Min=1,Max=50,Default=5,Step=1})
-DupeTab:AddButton("Start Axe Dupe",function()
-    StartAxeDupe(dupeWaitSlider:Get()*0.1, dupeAmtSlider:Get())
-end)
-DupeTab:AddButton("Drop All Axes", DropAllAxes)
-DupeTab:AddSection("Item Tools")
-DupeTab:AddButton("Re-grab Dropped Tools", GrabTools)
-DupeTab:AddButton("Clone Held Tool",function()
-    local c = GetChar(); if not c then return end
-    local t = c:FindFirstChildOfClass("Tool"); if not t then return end
-    pcall(function() t:Clone().Parent = LP.Backpack end)
-end)
-
--- MONEY TAB
-local MoneyTab = CreateTab("Money","💵")
-MoneyTab:AddSection("How It Works")
-MoneyTab:AddLabel("1. Chop trees (auto or manual)")
-MoneyTab:AddLabel("2. Press 'Sell All Wood Now'")
-MoneyTab:AddLabel("3. Wood is placed on SELLWOOD trigger")
-MoneyTab:AddLabel("4. Server detects touch and pays you")
-MoneyTab:AddLabel("5. Toggle Auto Sell for repeat loop")
-MoneyTab:AddSection("Auto Money")
-MoneyTab:AddToggle("Auto Money (Sell Loop)",{Default=false},function(v)
-    if v then StartMoneyDupe() else StopMoneyDupe() end
-end)
-MoneyTab:AddSection("Manual")
-MoneyTab:AddButton("Sell All Wood Now", SellWood)
-MoneyTab:AddButton("Move Trees → Dropoff", DupeWood)
-MoneyTab:AddSection("Balance")
-local moneyLbl = MoneyTab:AddLabel("Balance: press Refresh")
-MoneyTab:AddButton("Refresh Balance",function()
-    moneyLbl:Set("Balance: $"..GetFunds())
-end)
-
--- SETTINGS TAB
-local SettingsTab = CreateTab("Settings","⚙")
-SettingsTab:AddSection("Controls")
-SettingsTab:AddLabel("PC: Right Ctrl = toggle  |  ─ = minimize")
-SettingsTab:AddLabel("Mobile: Tap LT icon to restore window")
-SettingsTab:AddLabel("Drag the title bar or LT icon to move")
-SettingsTab:AddSection("Feature Guide")
-SettingsTab:AddLabel("FLY: Toggle → WASD, Space=up, LShift=down")
-SettingsTab:AddLabel("NOCLIP: Walk through objects. Toggle off to restore.")
-SettingsTab:AddLabel("AUTO CHOP: Fires CutEvent on nearest tree. Works without axe.")
-SettingsTab:AddLabel("AUTO SELL: Places cut wood on SELLWOOD trigger every 4s.")
-SettingsTab:AddLabel("DUPE WOOD: Moves tree models to dropoff area.")
-SettingsTab:AddLabel("AXE DUPE: Equip/unequip loop. Then drop+regrab.")
-SettingsTab:AddLabel("SELL: Wood placed at SELLWOOD(255.7,3.9,66.1) is sold by server.")
-SettingsTab:AddLabel("OWNERSHIP: Server checks plot ownership. Chop on YOUR plot.")
-SettingsTab:AddSection("About")
-SettingsTab:AddLabel("Joffer Hub UI + Fixed v4.0 Logic Merge  |  Game: 13822889")
-SettingsTab:AddLabel("All remotes verified from RBXLX deep analysis")
-SettingsTab:AddSection("Debug")
-SettingsTab:AddButton("Reset Remote Cache",function()
-    _Interaction=nil; _TransactionsC2S=nil; _TransactionsS2C=nil
-    _LoadSaveRequests=nil; _PropertyPurchasing=nil
-end)
-SettingsTab:AddButton("Rejoin Server",function()
-    game:GetService("TeleportService"):Teleport(game.PlaceId, LP)
-end)
-SettingsTab:AddButton("Destroy GUI",function() ScreenGui:Destroy() end)
-
--- ═══════════════════════════════════════════════════════════════════
+-- ─────────────────────────────────────────────────────────────────
 -- ACTIVATE FIRST TAB + OPEN ANIMATION
--- ═══════════════════════════════════════════════════════════════════
+-- ─────────────────────────────────────────────────────────────────
 task.defer(function()
     task.wait()
     for _, t in pairs(Tabs) do
@@ -1194,5 +859,4 @@ end)
 Main.Size=UDim2.new(0,0,0,0); Main.BackgroundTransparency=1
 TwF(Main,{BackgroundTransparency=0}); TwS(Main,{Size=UDim2.new(0,T.WinW,0,T.WinH)})
 
-print("[JofferHub UI + v4.0 Logic] Loaded! GUI → "..tostring(guiParent).."  |  RightCtrl = toggle")
-print("[LT2 Hub] SELLWOOD @ (255.7, 3.9, 66.1) | WOODDROPOFF @ (322.5, 11.0, 97.1)")
+print("[JofferHub + Ancestor Logic] Loaded successfully!")
