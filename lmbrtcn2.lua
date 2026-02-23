@@ -516,59 +516,20 @@ LP.CharacterAdded:Connect(function(c)
 end)
 
 -- ═══════════════════════════════════════════════════════════════════
--- TELEPORT — FIXED
--- Problem: Plain hrp.CFrame= sometimes fails or rubber-bands.
--- Fix: zero velocity, disable physics, set CFrame in a loop until confirmed.
+-- SAFE TELEPORT — Simple & Reliable
+-- Root cause of the "stuck/flung" bug was the old version:
+--   - Disabled CanCollide on ALL parts (broke physics state)
+--   - Ran 3 retry loops with task.wait between each (stacked calls)
+--   - Added +8Y on top of already-elevated waypoints (double-offset)
+-- Fix: one clean CFrame set, zero velocity, done.
 -- ═══════════════════════════════════════════════════════════════════
--- ── SAFE TELEPORT — v6 ───────────────────────────────────────────
--- Handles terrain clipping by:
--- 1. Disabling CanCollide on all character BaseParts during TP
---    (fixes collision with PARTS, walls, structures)
--- 2. Teleporting 8 studs ABOVE the target position
---    (gives clearance above terrain since terrain ignores CanCollide)
--- 3. Re-enabling collision after 0.5s so physics settles naturally
--- 4. Zeroing velocity before and after to prevent rubber-banding
-local function SafeTeleport(cf, retries)
-    retries = retries or 3
+local function SafeTeleport(cf)
     local hrp = GetHRP()
-    local char = GetChar()
-    if not hrp or not char then return end
-
-    -- Step 1: Disable collision on all character parts (avoids clipping into parts/structures)
-    local collidable = {}
-    for _, part in ipairs(char:GetDescendants()) do
-        if part:IsA("BasePart") and part.CanCollide then
-            collidable[part] = true
-            part.CanCollide = false
-        end
-    end
-
-    -- Step 2: Teleport to target + 8 studs above (terrain clearance)
-    -- Gravity will bring the player down to the correct surface
-    local safeCF = cf + Vector3.new(0, 8, 0)
-
-    for i = 1, retries do
-        pcall(function()
-            hrp.AssemblyLinearVelocity  = Vector3.zero
-            hrp.AssemblyAngularVelocity = Vector3.zero
-            hrp.CFrame = safeCF
-        end)
-        task.wait(0.15)
-        if (hrp.Position - safeCF.Position).Magnitude < 15 then break end
-    end
-
-    -- Step 3: Re-enable collision after physics settles (0.5s)
-    task.delay(0.5, function()
-        for part in pairs(collidable) do
-            pcall(function() part.CanCollide = true end)
-        end
-        -- Final velocity zero to prevent post-TP drift
-        pcall(function()
-            local h = GetHRP()
-            if h then
-                h.AssemblyLinearVelocity = Vector3.zero
-            end
-        end)
+    if not hrp then return end
+    pcall(function()
+        hrp.AssemblyLinearVelocity  = Vector3.zero
+        hrp.AssemblyAngularVelocity = Vector3.zero
+        hrp.CFrame = cf
     end)
 end
 
@@ -987,159 +948,117 @@ local function StopAutoBuy()
 end
 
 -- ═══════════════════════════════════════════════════════════════════
--- AXE DUPE — SAVE/LOAD SLOT METHOD (CORRECT)
+-- AXE DUPE — Save / Kill / RequestLoad Method
 --
--- HOW IT ACTUALLY WORKS:
---   1. Player has ≥1 axe in their backpack/character.
---   2. We call RequestSave(slot) — the server saves your current
---      inventory (including the axe) to the chosen slot.
---   3. We kill the character (Health = 0). When you die, all held/
---      backpack tools are DROPPED onto the ground near your plot.
---      They stay there — the server hasn't removed them.
---   4. After respawn, LT2 forces the "pick land position" prompt
---      (you're in the default $20 / unloaded state at this point).
---      We auto-confirm via SelectLoadPlot() after a short delay.
---   5. Confirming land triggers the server to load your saved slot →
---      it GIVES YOU BACK the axe from the save.
---   6. You now have: the dropped axe (still on map) + the loaded axe
---      = axes DOUBLED.
---   7. Grab the dropped axe with GrabTools, then repeat to double again.
+-- HOW IT WORKS (matches reference v2.9 behavior):
+--   "Your Loaded Slot" = the slot your save is currently in (save target)
+--   "Slot to load"     = the slot to reload after reset (usually same)
 --
--- COOLDOWN: LT2 enforces ~60s between save/load operations server-side.
---   The button shows a live countdown and blocks early clicks.
+--   1. RequestSave(loadedSlot)  → server saves inventory WITH your axe
+--   2. Kill character           → axe drops to the ground on your plot
+--   3. Wait for respawn (~3s)
+--   4. RequestLoad(slotToLoad)  → server gives you back the axe from save
+--   5. GrabTools()              → pick up the dropped axe from the ground
+--   Result: ground axe + loaded axe = DOUBLED
 --
--- SLOT: Save slot and load slot must be the SAME number (1, 2, or 3).
+-- COOLDOWN: LT2 server enforces ~60s between save/load calls.
+--   Clicking Dupe Axe too early shows a countdown and does nothing.
 -- ═══════════════════════════════════════════════════════════════════
-local AXE_DUPE_COOLDOWN = 65        -- seconds (65 > 60 server cooldown)
-local axeDupeLastSave   = 0         -- tick() of last RequestSave call
-local axeDupeStatusLbl  = nil       -- reference set by Dupe tab UI
-local axeDupeRunning    = false
+local AXE_DUPE_CD   = 65      -- 65s > server's 60s cooldown
+local dupeSaveTime  = 0       -- tick() of last successful save
+local dupeRunning   = false
+local dupeStatusLbl = nil     -- set by the Dupe tab after it's built
 
--- Save current inventory to a slot
-local function SaveSlotForDupe(slotNum)
-    local ls = GetLoadSave()
-    if not ls then
-        warn("[AxeDupe] LoadSaveRequests folder not found in ReplicatedStorage")
-        return false
-    end
-    local rf = ls:FindFirstChild("RequestSave")
-    if not rf or not rf:IsA("RemoteFunction") then
-        warn("[AxeDupe] RequestSave RemoteFunction not found")
-        return false
-    end
-    local ok, result = pcall(function() return rf:InvokeServer(slotNum) end)
-    print("[AxeDupe] RequestSave(slot="..tostring(slotNum)..") ok="..tostring(ok).." result="..tostring(result))
-    return ok
-end
-
--- Auto-confirm land position after respawn (triggers slot load on server)
-local function ConfirmLandPosition()
-    local pp = GetPropertyPurchasing()
-    if not pp then
-        warn("[AxeDupe] PropertyPurchasing folder not found")
-        return
-    end
-    local rf = pp:FindFirstChild("SelectLoadPlot")
-    if rf and rf:IsA("RemoteFunction") then
-        local ok, r = pcall(function() return rf:InvokeServer() end)
-        print("[AxeDupe] SelectLoadPlot() ok="..tostring(ok).." result="..tostring(r))
-    else
-        warn("[AxeDupe] SelectLoadPlot not found — confirm land manually in-game")
-    end
-end
-
--- Update status label if it exists
 local function SetDupeStatus(msg)
-    if axeDupeStatusLbl then
-        pcall(function() axeDupeStatusLbl:Set(msg) end)
+    print("[AxeDupe] " .. msg)
+    if dupeStatusLbl then pcall(function() dupeStatusLbl:Set(msg) end) end
+end
+
+local function StartAxeDupe(loadedSlot, slotToLoad)
+    -- Cooldown guard
+    if dupeRunning then
+        SetDupeStatus("⚠ Already running...")
+        return
     end
-    print("[AxeDupe] "..msg)
-end
-
--- Start the countdown display after a successful dupe
-local function StartCooldownDisplay()
-    task.spawn(function()
-        for i = AXE_DUPE_COOLDOWN, 1, -1 do
-            task.wait(1)
-            SetDupeStatus("⏳ Cooldown: "..i.."s remaining")
-        end
-        SetDupeStatus("✅ Ready to dupe again!")
-    end)
-end
-
--- Main dupe function — call once per dupe cycle
-local function StartAxeDupe(slotNum)
-    if axeDupeRunning then
-        SetDupeStatus("⚠ Dupe already in progress...")
+    local wait = math.ceil(AXE_DUPE_CD - (tick() - dupeSaveTime))
+    if wait > 0 then
+        SetDupeStatus("⏳ Cooldown — wait " .. wait .. "s")
         return
     end
 
-    -- Cooldown check
-    local elapsed = tick() - axeDupeLastSave
-    local remaining = math.ceil(AXE_DUPE_COOLDOWN - elapsed)
-    if remaining > 0 then
-        SetDupeStatus("⏳ On cooldown — please wait "..remaining.."s")
-        return
-    end
-
-    -- Verify we have at least one tool
+    -- Need at least one tool
     local char = GetChar()
-    if not char then SetDupeStatus("❌ No character found"); return end
-    local toolCount = #LP.Backpack:GetChildren()
-    for _, v in ipairs(char:GetChildren()) do
-        if v:IsA("Tool") then toolCount = toolCount + 1 end
-    end
-    if toolCount == 0 then
-        SetDupeStatus("❌ No axe/tool in backpack — buy one first!")
+    if not char then SetDupeStatus("❌ No character") return end
+    local hasTool = char:FindFirstChildOfClass("Tool") or LP.Backpack:FindFirstChildOfClass("Tool")
+    if not hasTool then
+        SetDupeStatus("❌ No axe found — buy one first!")
         return
     end
 
-    axeDupeRunning = true
-
+    dupeRunning = true
     task.spawn(function()
-        -- STEP 1: Save slot (captures axe in inventory)
-        SetDupeStatus("💾 Saving slot "..tostring(slotNum).."...")
-        local saved = SaveSlotForDupe(slotNum)
-        if not saved then
-            SetDupeStatus("❌ Save failed. Check slot number / try again.")
-            axeDupeRunning = false
-            return
-        end
-        axeDupeLastSave = tick()   -- mark cooldown start
-        task.wait(0.6)
 
-        -- STEP 2: Kill character — tools drop to ground
-        SetDupeStatus("💀 Resetting character (tools drop to ground)...")
+        -- STEP 1: Save current slot
+        SetDupeStatus("💾 Saving slot " .. loadedSlot .. "...")
+        local ls = GetLoadSave()
+        if not ls then SetDupeStatus("❌ LoadSaveRequests not found") dupeRunning=false return end
+        local saveRF = ls:FindFirstChild("RequestSave")
+        if not saveRF then SetDupeStatus("❌ RequestSave not found") dupeRunning=false return end
+        local ok = pcall(function() saveRF:InvokeServer(loadedSlot) end)
+        if not ok then SetDupeStatus("❌ Save failed — on cooldown?") dupeRunning=false return end
+        dupeSaveTime = tick()
+        task.wait(0.5)
+
+        -- STEP 2: Kill character so tools drop to ground
+        SetDupeStatus("💀 Resetting character...")
         local hum = GetHum()
         if hum then
             pcall(function() hum.Health = 0 end)
         else
-            -- fallback: LoadCharacter
             pcall(function() LP:LoadCharacter() end)
         end
 
-        -- STEP 3: Wait for respawn + LT2 land-selection prompt to appear
-        SetDupeStatus("⏳ Waiting for respawn + land prompt (~5s)...")
-        task.wait(5)
+        -- STEP 3: Wait for respawn
+        SetDupeStatus("⏳ Waiting for respawn...")
+        local waited = 0
+        repeat task.wait(0.5); waited = waited + 0.5 until GetHum() or waited > 10
 
-        -- STEP 4: Auto-confirm land position → server loads save → axe duplicated
-        SetDupeStatus("📍 Confirming land position (loads saved axe)...")
-        ConfirmLandPosition()
-        task.wait(1.5)
+        task.wait(1.5) -- extra settle time
 
-        -- STEP 5: Grab dropped axe back into backpack
+        -- STEP 4: RequestLoad — gives back saved axe
+        SetDupeStatus("📦 Loading slot " .. slotToLoad .. "...")
+        ls = GetLoadSave() -- re-fetch in case of respawn
+        if ls then
+            local loadRF = ls:FindFirstChild("RequestLoad")
+            if loadRF then
+                pcall(function() loadRF:InvokeServer(slotToLoad) end)
+            else
+                -- Fallback: some versions use ClientMayLoad then RequestLoad
+                local cmLoad = ls:FindFirstChild("ClientMayLoad")
+                if cmLoad then pcall(function() cmLoad:InvokeServer(slotToLoad) end) end
+                SetDupeStatus("⚠ RequestLoad not found, tried fallback")
+            end
+        end
+        task.wait(1)
+
+        -- STEP 5: Grab the dropped axe off the ground
         SetDupeStatus("🪓 Grabbing dropped tools...")
         GrabTools()
         task.wait(0.5)
 
-        local newCount = #LP.Backpack:GetChildren()
-        for _, v in ipairs((GetChar() or {}):GetChildren() or {}) do
-            if v:IsA("Tool") then newCount = newCount + 1 end
-        end
-        SetDupeStatus("✅ Done! You now have ~"..newCount.." tool(s). Cooldown: 65s")
+        -- Count result
+        local count = #LP.Backpack:GetChildren()
+        local c2 = GetChar()
+        if c2 then for _,v in ipairs(c2:GetChildren()) do if v:IsA("Tool") then count=count+1 end end end
+        SetDupeStatus("✅ Done! ~" .. count .. " tool(s). Cooldown 65s...")
 
-        axeDupeRunning = false
-        StartCooldownDisplay()
+        -- Live countdown display
+        for i = AXE_DUPE_CD, 1, -1 do
+            task.wait(1)
+            SetDupeStatus("⏳ Cooldown: " .. i .. "s")
+        end
+        SetDupeStatus("✅ Ready to dupe again!")
+        dupeRunning = false
     end)
 end
 
@@ -1242,6 +1161,15 @@ local function ForceSave(slotNum)
     local ls = GetLoadSave()
     if not ls then return end
     local rf = ls:FindFirstChild("RequestSave")
+    if rf and rf:IsA("RemoteFunction") then
+        pcall(function() rf:InvokeServer(slotNum or 1) end)
+    end
+end
+
+local function LoadSlot(slotNum)
+    local ls = GetLoadSave()
+    if not ls then return end
+    local rf = ls:FindFirstChild("RequestLoad")
     if rf and rf:IsA("RemoteFunction") then
         pcall(function() rf:InvokeServer(slotNum or 1) end)
     end
@@ -1400,26 +1328,22 @@ PlayerTab:AddButton("Refresh Funds",function()
     fundsLbl:Set("Funds: $"..GetFunds())
 end)
 
--- SLOT TAB
+-- SLOT TAB  (matches reference v2.9 SlotTab layout)
 local SlotTab = CreateTab("Slot","🏠")
-SlotTab:AddSection("Base & Land")
-SlotTab:AddButton("Teleport → My Base", BaseHelp)
-SlotTab:AddButton("Claim Free Land", FreeLand)
-SlotTab:AddButton("Expand Land (Max)",function()
-    -- ClientExpandedProperty is a RemoteEvent in PropertyPurchasing — CONFIRMED
+SlotTab:AddSection("Base Option")
+local slotSlider = SlotTab:AddSlider("Slot",{Min=1,Max=3,Default=1,Step=1})
+SlotTab:AddButton("Load Slot", function()
+    LoadSlot(slotSlider:Get())
+end)
+SlotTab:AddButton("Force Save", function()
+    ForceSave(slotSlider:Get())
+end)
+SlotTab:AddSection("Land Option")
+SlotTab:AddButton("Free Land", FreeLand)
+SlotTab:AddButton("Max Land", function()
     local pp = GetPropertyPurchasing(); if not pp then return end
     local evt = pp:FindFirstChild("ClientExpandedProperty")
     if evt and evt:IsA("RemoteEvent") then pcall(function() evt:FireServer() end) end
-end)
-SlotTab:AddSection("Save & Clear")
-SlotTab:AddButton("Force Save", ForceSave)
-SlotTab:AddButton("Clear Plot (non-base)",function()
-    local plot = GetMyPlot(); if not plot then return end
-    for _, part in ipairs(plot:GetDescendants()) do
-        if part:IsA("BasePart") and part.Name ~= "Base" and part.Name ~= "Land" then
-            pcall(function() part:Destroy() end)
-        end
-    end
 end)
 SlotTab:AddSection("Steal Plot")
 local stealOpts = {}
@@ -1521,33 +1445,26 @@ BuyTab:AddToggle("Auto Buy Loop",{Default=false},function(v)
     if v then StartAutoBuy(Flags.AutBuyItem, buyAmtSlider:Get()) else StopAutoBuy() end
 end)
 
--- DUPE TAB
+-- DUPE TAB  (matches reference v2.9 layout)
 local DupeTab = CreateTab("Dupe","📦")
-DupeTab:AddSection("Wood Dupe")
+DupeTab:AddSection("Dupe")
+-- Slider 1: Your Loaded Slot (the slot you currently have loaded = save target)
+local loadedSlotSlider = DupeTab:AddSlider("Your Loaded Slot",{Min=1,Max=3,Default=1,Step=1})
+-- Slider 2: Slot to load after reset
+local slotToLoadSlider = DupeTab:AddSlider("Slot to load",{Min=1,Max=3,Default=1,Step=1})
+-- Status display — wired to dupeStatusLbl used inside StartAxeDupe
+local _dsLbl = DupeTab:AddLabel("Status: Ready ✅")
+dupeStatusLbl = _dsLbl
+DupeTab:AddButton("Dupe Axe", function()
+    StartAxeDupe(loadedSlotSlider:Get(), slotToLoadSlider:Get())
+end)
+DupeTab:AddSection("Base Dupe")
 DupeTab:AddLabel("Moves trees to dropoff → auto-chop there")
 DupeTab:AddButton("Move Trees → Dropoff", DupeWood)
 DupeTab:AddButton("Sell Current Wood",    SellWood)
-DupeTab:AddSection("Axe Dupe — Save/Load Method")
-DupeTab:AddLabel("1. Have ≥1 axe in backpack")
-DupeTab:AddLabel("2. Choose slot (load = same slot)")
-DupeTab:AddLabel("3. Click Dupe Axe → axes double")
-DupeTab:AddLabel("4. Repeat after 65s cooldown")
-local dupeSlotDrop = DupeTab:AddDropdown("Save Slot",{Options={"1","2","3"},Default="1"})
--- Status label — referenced by the dupe logic for live updates
-local _axeDupeStatusRow = DupeTab:AddLabel("Status: Ready ✅")
-axeDupeStatusLbl = _axeDupeStatusRow  -- wire up to global used by StartAxeDupe
-DupeTab:AddButton("🪓 Dupe Axe",function()
-    StartAxeDupe(tonumber(dupeSlotDrop:Get()))
-end)
-DupeTab:AddButton("Re-grab Dropped Tools", GrabTools)
-DupeTab:AddButton("Drop All Axes", DropAllAxes)
 DupeTab:AddSection("Item Tools")
 DupeTab:AddButton("Re-grab Dropped Tools", GrabTools)
-DupeTab:AddButton("Clone Held Tool",function()
-    local c = GetChar(); if not c then return end
-    local t = c:FindFirstChildOfClass("Tool"); if not t then return end
-    pcall(function() t:Clone().Parent = LP.Backpack end)
-end)
+DupeTab:AddButton("Drop All Axes", DropAllAxes)
 
 -- MONEY TAB
 local MoneyTab = CreateTab("Money","💵")
