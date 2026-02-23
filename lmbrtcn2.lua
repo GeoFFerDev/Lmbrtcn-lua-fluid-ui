@@ -516,12 +516,9 @@ LP.CharacterAdded:Connect(function(c)
 end)
 
 -- ═══════════════════════════════════════════════════════════════════
--- SAFE TELEPORT — Simple & Reliable
--- Root cause of the "stuck/flung" bug was the old version:
---   - Disabled CanCollide on ALL parts (broke physics state)
---   - Ran 3 retry loops with task.wait between each (stacked calls)
---   - Added +8Y on top of already-elevated waypoints (double-offset)
--- Fix: one clean CFrame set, zero velocity, done.
+-- SAFE TELEPORT
+-- Single clean CFrame set + zero velocity. No collision hacks,
+-- no retry loops, no stacking side-effects.
 -- ═══════════════════════════════════════════════════════════════════
 local function SafeTeleport(cf)
     local hrp = GetHRP()
@@ -688,78 +685,44 @@ end
 -- ═══════════════════════════════════════════════════════════════════
 
 -- SELLWOOD exact position from RBXLX: (255.7, 3.9, 66.1), size 0.2 × 1.8 × 5.4
--- We position wood to intersect the SELLWOOD part face (X side)
-local SELLWOOD_POS = Vector3.new(255.7, 3.9, 66.1)
-local SELLWOOD_SIZE = Vector3.new(0.2, 1.8, 5.4)
-
 -- ═══════════════════════════════════════════════════════════════════
--- SELL WOOD — REWORKED v2
---
--- ROOT CAUSE OF FAILURE: FilteringEnabled means anchoring/moving parts
--- on the client does NOT replicate to server. The server's Touched event
--- on SELLWOOD only fires when SERVER-PHYSICS detects contact.
---
--- CORRECT STRATEGY:
---   1. Teleport the player CHARACTER to the SELLWOOD trigger position.
---      This registers the player's presence near the sell zone.
---   2. Move wood pieces to positions near SELLWOOD on the client.
---      Parts that have been placed in Workspace root (not in a plot)
---      CAN be moved client-side if the client has network ownership.
---   3. After repositioning, disable anchoring so physics simulation
---      causes them to naturally fall into SELLWOOD's hitbox.
---   4. Wait generous time for server to pick up touches.
---
--- The key difference: we MUST teleport the player to SELLWOOD first,
--- THEN move wood there. Without player presence the server may not
--- grant network ownership of nearby parts to this client.
+-- SELL WOOD
+-- TP player to sell zone, then move owned wood onto SELLWOOD trigger.
+-- Client has network ownership of nearby unanchored parts, so
+-- repositioning them will replicate and the server Touched fires.
 -- ═══════════════════════════════════════════════════════════════════
 local function SellWood()
+    local hrp = GetHRP(); if not hrp then return end
+
+    -- Teleport to sell zone first (gives client network ownership of nearby parts)
+    SafeTeleport(CFrame.new(258, 5, 66.1))
+    task.wait(0.8)
+
     local pieces = GetWoodPieces()
     if #pieces == 0 then
-        warn("[LT2 Hub] No wood pieces found to sell.")
+        warn("[LT2 Hub] No cut wood found to sell.")
         return
     end
 
-    -- Step 1: Teleport player to SELLWOOD area
-    -- SELLWOOD is at X=255.7, Y=3.9, Z=66.1 — stand right in front of it
-    SafeTeleport(CFrame.new(258, 8, 66.1))
-    task.wait(0.5) -- let server register player at sell zone
-
     local n = 0
-    -- Step 2: Move each wood piece to intersect SELLWOOD
-    -- SELLWOOD wall: X=255.7, Y=3.9, Z=66.1, size 0.2x1.8x5.4
-    -- Position pieces just beyond the wall face so they touch it
-    for i, part in ipairs(pieces) do
-        if n >= 200 then break end
+    for _, part in ipairs(pieces) do
+        if n >= 150 then break end
         pcall(function()
-            -- Ensure part is in root Workspace (not inside a model/plot folder)
             part.Parent = Workspace
+            part.Anchored = false
             part.AssemblyLinearVelocity  = Vector3.zero
             part.AssemblyAngularVelocity = Vector3.zero
-            -- DO NOT anchor — unanchored parts replicate physics to server
-            -- Position pieces at SELLWOOD face, spread within its Z span
-            local row = math.floor(n / 6)
-            local col = n % 6
-            part.CFrame = CFrame.new(
-                256.5,           -- just past SELLWOOD (X=255.7), so they'll drift into it
-                4.5 + row * 1.5, -- stack vertically
-                63.4 + col * 0.9 -- spread across Z span of SELLWOOD (63.4~68.8)
-            )
+            -- Place directly on SELLWOOD face (255.7, 3.9, 66.1), spread in Z
+            -- SELLWOOD size is 0.2 x 1.8 x 5.4 — Z range is ~63.4 to 68.8
+            local zOff = (n % 8) * 0.6 - 2.4
+            local yOff = math.floor(n / 8) * 0.5
+            part.CFrame = CFrame.new(255.8, 4.0 + yOff, 66.1 + zOff)
         end)
         n = n + 1
-        -- Yield occasionally so physics settles
-        if n % 10 == 0 then task.wait(0.05) end
+        if n % 8 == 0 then task.wait(0.05) end
     end
-    -- Step 3: Wait for server to detect all touches (generous window)
-    task.wait(1.0)
-    -- Step 4: Clean up any remaining undetected pieces
-    for i, part in ipairs(pieces) do
-        pcall(function()
-            if part and part.Parent then
-                part.AssemblyLinearVelocity = Vector3.zero
-            end
-        end)
-    end
+
+    task.wait(1.5)
 end
 
 -- ═══════════════════════════════════════════════════════════════════
@@ -824,19 +787,25 @@ local function DupeWood()
 end
 
 -- ═══════════════════════════════════════════════════════════════════
--- AUTO CHOP — REWORKED
--- Works WITHOUT an axe by firing the CutEvent BindableEvent directly.
--- CutEvent is a BindableEvent on each tree Model — :Fire() triggers
--- the tree's internal cut logic (which runs LocalScript-side).
--- Note: The actual damage/felling still needs an axe equipped on the
--- server side in some versions. We fire CutEvent repeatedly to max
--- out the tree's internal health counter.
+-- AUTO CHOP
+-- Fires CutEvent BindableEvent on the nearest matching tree.
+-- Throttled to 5× per second (was every Heartbeat = 60×/sec which
+-- caused mass lag and constant TP spam).
+-- TP to tree is debounced — only teleports once per tree, not every tick.
 -- ═══════════════════════════════════════════════════════════════════
 local autoChopConn
+local _lastChopTP = 0       -- tick() of last tree-TP
+local _lastChopTree = nil   -- last tree we TPd to (avoid re-TPing same tree)
+
 local function StartAutoChop()
     if autoChopConn then autoChopConn:Disconnect() end
+
+    local nextTick = 0
     autoChopConn = RunService.Heartbeat:Connect(function()
         if not Flags.AutoChop then return end
+        if tick() < nextTick then return end  -- throttle to ~5/sec
+        nextTick = tick() + 0.2
+
         local hrp = GetHRP()
         if not hrp then return end
 
@@ -850,9 +819,7 @@ local function StartAutoChop()
                     if bp then
                         local d = (hrp.Position - bp.Position).Magnitude
                         if d < nearestDist then
-                            nearest = v
-                            nearestDist = d
-                            nearestCE = GetCutEvent(v)
+                            nearest = v; nearestDist = d; nearestCE = GetCutEvent(v)
                         end
                     end
                 end
@@ -860,20 +827,22 @@ local function StartAutoChop()
         end
 
         if nearest and nearestCE then
-            -- Teleport player to the tree first if too far
-            if nearestDist > 15 then
+            -- Only TP once per new tree, not every tick
+            if nearestDist > 12 and nearest ~= _lastChopTree then
+                _lastChopTree = nearest
                 local bp = nearest:FindFirstChildWhichIsA("BasePart")
                 if bp then
-                    SafeTeleport(CFrame.new(bp.Position + Vector3.new(0, 5, 4)), 1)
+                    SafeTeleport(CFrame.new(bp.Position + Vector3.new(0, 5, 4)))
                 end
             end
-            -- Fire the CutEvent BindableEvent
             pcall(function() nearestCE:Fire() end)
         end
     end)
 end
+
 local function StopAutoChop()
     Flags.AutoChop = false
+    _lastChopTree = nil
     if autoChopConn then autoChopConn:Disconnect(); autoChopConn = nil end
 end
 
@@ -917,17 +886,15 @@ end
 -- ═══════════════════════════════════════════════════════════════════
 local autoBuyThread
 local function BuyAxe(item)
-    -- Teleport to Wood R' Us store counter (confirmed at 301.7, 13.8, 57.5)
-    SafeTeleport(CFrame.new(301.7, 24, 57.5))
+    -- Wood R' Us store floor is at Y~0.3, player stands at Y=5
+    SafeTeleport(CFrame.new(301.7, 5, 30))
     task.wait(1.2)
     local c2s = GetTransactionsC2S()
     if c2s then
         local rf = c2s:FindFirstChild("AttemptPurchase")
         if rf and rf:IsA("RemoteFunction") then
             local ok, result = pcall(function() return rf:InvokeServer(item) end)
-            if ok then
-                print("[LT2 Hub] Purchase result:", tostring(result))
-            end
+            if ok then print("[LT2 Hub] Purchase result:", tostring(result)) end
         end
     end
 end
@@ -948,117 +915,92 @@ local function StopAutoBuy()
 end
 
 -- ═══════════════════════════════════════════════════════════════════
--- AXE DUPE — Save / Kill / RequestLoad Method
+-- AXE DUPE
 --
--- HOW IT WORKS (matches reference v2.9 behavior):
---   "Your Loaded Slot" = the slot your save is currently in (save target)
---   "Slot to load"     = the slot to reload after reset (usually same)
+-- CORRECT FLOW (manual land placement required):
+--   1. RequestSave(slot)  → server saves inventory WITH your axe
+--   2. Humanoid.Health=0  → character dies, axe drops to ground
+--      ** Script stops here — DO NOT auto-call RequestLoad **
+--   3. LT2 shows the land placement grid — YOU place your land manually
+--   4. When you confirm placement, LT2 server automatically loads
+--      your last save → gives you back the axe from the save
+--   5. Click "Grab Dropped Tools" to pick up the axe still on the ground
+--   Result: ground axe + loaded axe = DOUBLED. Repeat after 65s cooldown.
 --
---   1. RequestSave(loadedSlot)  → server saves inventory WITH your axe
---   2. Kill character           → axe drops to the ground on your plot
---   3. Wait for respawn (~3s)
---   4. RequestLoad(slotToLoad)  → server gives you back the axe from save
---   5. GrabTools()              → pick up the dropped axe from the ground
---   Result: ground axe + loaded axe = DOUBLED
---
--- COOLDOWN: LT2 server enforces ~60s between save/load calls.
---   Clicking Dupe Axe too early shows a countdown and does nothing.
+-- WHY NO AUTO-LOAD: Calling RequestLoad before land is confirmed
+--   breaks LT2's state machine → camera freeze / stuck in limbo.
+--   The server handles the load automatically on land confirmation.
 -- ═══════════════════════════════════════════════════════════════════
-local AXE_DUPE_CD   = 65      -- 65s > server's 60s cooldown
-local dupeSaveTime  = 0       -- tick() of last successful save
-local dupeRunning   = false
-local dupeStatusLbl = nil     -- set by the Dupe tab after it's built
+local AXE_DUPE_CD  = 65
+local dupeSaveTime = 0
+local dupeRunning  = false
+local dupeStatusLbl = nil   -- wired by Dupe tab
 
 local function SetDupeStatus(msg)
     print("[AxeDupe] " .. msg)
     if dupeStatusLbl then pcall(function() dupeStatusLbl:Set(msg) end) end
 end
 
-local function StartAxeDupe(loadedSlot, slotToLoad)
-    -- Cooldown guard
+local function StartAxeDupe(slotNum)
     if dupeRunning then
-        SetDupeStatus("⚠ Already running...")
+        SetDupeStatus("⚠ Already running")
         return
     end
-    local wait = math.ceil(AXE_DUPE_CD - (tick() - dupeSaveTime))
-    if wait > 0 then
-        SetDupeStatus("⏳ Cooldown — wait " .. wait .. "s")
+    local remaining = math.ceil(AXE_DUPE_CD - (tick() - dupeSaveTime))
+    if remaining > 0 then
+        SetDupeStatus("⏳ Cooldown — wait " .. remaining .. "s")
         return
     end
 
-    -- Need at least one tool
-    local char = GetChar()
-    if not char then SetDupeStatus("❌ No character") return end
+    -- Must have at least one tool
+    local char = GetChar(); if not char then SetDupeStatus("❌ No character") return end
     local hasTool = char:FindFirstChildOfClass("Tool") or LP.Backpack:FindFirstChildOfClass("Tool")
     if not hasTool then
-        SetDupeStatus("❌ No axe found — buy one first!")
+        SetDupeStatus("❌ No axe in backpack — buy one first!")
         return
     end
 
     dupeRunning = true
     task.spawn(function()
 
-        -- STEP 1: Save current slot
-        SetDupeStatus("💾 Saving slot " .. loadedSlot .. "...")
+        -- STEP 1: Save slot
+        SetDupeStatus("💾 Saving slot " .. slotNum .. "...")
         local ls = GetLoadSave()
-        if not ls then SetDupeStatus("❌ LoadSaveRequests not found") dupeRunning=false return end
+        if not ls then
+            SetDupeStatus("❌ LoadSaveRequests folder not found")
+            dupeRunning = false; return
+        end
         local saveRF = ls:FindFirstChild("RequestSave")
-        if not saveRF then SetDupeStatus("❌ RequestSave not found") dupeRunning=false return end
-        local ok = pcall(function() saveRF:InvokeServer(loadedSlot) end)
-        if not ok then SetDupeStatus("❌ Save failed — on cooldown?") dupeRunning=false return end
+        if not saveRF then
+            SetDupeStatus("❌ RequestSave not found")
+            dupeRunning = false; return
+        end
+        local ok = pcall(function() saveRF:InvokeServer(slotNum) end)
+        if not ok then
+            SetDupeStatus("❌ Save failed (still on cooldown?)")
+            dupeRunning = false; return
+        end
         dupeSaveTime = tick()
-        task.wait(0.5)
+        task.wait(0.4)
 
-        -- STEP 2: Kill character so tools drop to ground
-        SetDupeStatus("💀 Resetting character...")
+        -- STEP 2: Kill character — tools fall to the ground
+        SetDupeStatus("💀 Dying — axes drop to ground...")
         local hum = GetHum()
         if hum then
             pcall(function() hum.Health = 0 end)
-        else
-            pcall(function() LP:LoadCharacter() end)
         end
-
-        -- STEP 3: Wait for respawn
-        SetDupeStatus("⏳ Waiting for respawn...")
-        local waited = 0
-        repeat task.wait(0.5); waited = waited + 0.5 until GetHum() or waited > 10
-
-        task.wait(1.5) -- extra settle time
-
-        -- STEP 4: RequestLoad — gives back saved axe
-        SetDupeStatus("📦 Loading slot " .. slotToLoad .. "...")
-        ls = GetLoadSave() -- re-fetch in case of respawn
-        if ls then
-            local loadRF = ls:FindFirstChild("RequestLoad")
-            if loadRF then
-                pcall(function() loadRF:InvokeServer(slotToLoad) end)
-            else
-                -- Fallback: some versions use ClientMayLoad then RequestLoad
-                local cmLoad = ls:FindFirstChild("ClientMayLoad")
-                if cmLoad then pcall(function() cmLoad:InvokeServer(slotToLoad) end) end
-                SetDupeStatus("⚠ RequestLoad not found, tried fallback")
-            end
-        end
-        task.wait(1)
-
-        -- STEP 5: Grab the dropped axe off the ground
-        SetDupeStatus("🪓 Grabbing dropped tools...")
-        GrabTools()
         task.wait(0.5)
 
-        -- Count result
-        local count = #LP.Backpack:GetChildren()
-        local c2 = GetChar()
-        if c2 then for _,v in ipairs(c2:GetChildren()) do if v:IsA("Tool") then count=count+1 end end end
-        SetDupeStatus("✅ Done! ~" .. count .. " tool(s). Cooldown 65s...")
+        -- DONE — tell user what to do next
+        SetDupeStatus("📍 Place your land → then click Grab Tools!")
+        dupeRunning = false
 
-        -- Live countdown display
+        -- Cooldown countdown
         for i = AXE_DUPE_CD, 1, -1 do
             task.wait(1)
-            SetDupeStatus("⏳ Cooldown: " .. i .. "s")
+            SetDupeStatus("⏳ Cooldown: " .. i .. "s  (place land then Grab Tools)")
         end
         SetDupeStatus("✅ Ready to dupe again!")
-        dupeRunning = false
     end)
 end
 
@@ -1135,21 +1077,12 @@ local function FreeLand()
     if not props then return end
     for _, plot in ipairs(props:GetChildren()) do
         local ow = plot:FindFirstChild("Owner")
-        -- Unclaimed: Owner exists but Value is nil/false
         if ow and not ow.Value then
             local origin = plot:FindFirstChild("OriginSquare") or plot:FindFirstChild("Square")
             if origin and origin:IsA("BasePart") then
+                -- Just TP to the unclaimed plot — user clicks to confirm in LT2 UI naturally
                 SafeTeleport(CFrame.new(origin.Position + Vector3.new(0, 10, 0)))
-                task.wait(0.8)
-                -- SelectLoadPlot is in PropertyPurchasing (RF) — CONFIRMED
-                local pp = GetPropertyPurchasing()
-                if pp then
-                    local rf = pp:FindFirstChild("SelectLoadPlot")
-                    if rf and rf:IsA("RemoteFunction") then
-                        local ok, r = pcall(function() return rf:InvokeServer() end)
-                        print("[LT2 Hub] SelectLoadPlot result:", ok, tostring(r))
-                    end
-                end
+                print("[LT2 Hub] Teleported to unclaimed plot — confirm in LT2 menu")
                 return
             end
         end
@@ -1158,20 +1091,20 @@ local function FreeLand()
 end
 
 local function ForceSave(slotNum)
-    local ls = GetLoadSave()
-    if not ls then return end
+    local ls = GetLoadSave(); if not ls then return end
     local rf = ls:FindFirstChild("RequestSave")
     if rf and rf:IsA("RemoteFunction") then
         pcall(function() rf:InvokeServer(slotNum or 1) end)
+        print("[LT2 Hub] Saved slot " .. tostring(slotNum or 1))
     end
 end
 
 local function LoadSlot(slotNum)
-    local ls = GetLoadSave()
-    if not ls then return end
+    local ls = GetLoadSave(); if not ls then return end
     local rf = ls:FindFirstChild("RequestLoad")
     if rf and rf:IsA("RemoteFunction") then
         pcall(function() rf:InvokeServer(slotNum or 1) end)
+        print("[LT2 Hub] Loaded slot " .. tostring(slotNum or 1))
     end
 end
 
@@ -1328,19 +1261,16 @@ PlayerTab:AddButton("Refresh Funds",function()
     fundsLbl:Set("Funds: $"..GetFunds())
 end)
 
--- SLOT TAB  (matches reference v2.9 SlotTab layout)
+-- SLOT TAB
 local SlotTab = CreateTab("Slot","🏠")
 SlotTab:AddSection("Base Option")
 local slotSlider = SlotTab:AddSlider("Slot",{Min=1,Max=3,Default=1,Step=1})
-SlotTab:AddButton("Load Slot", function()
-    LoadSlot(slotSlider:Get())
-end)
-SlotTab:AddButton("Force Save", function()
-    ForceSave(slotSlider:Get())
-end)
+SlotTab:AddButton("Load Slot",   function() LoadSlot(slotSlider:Get()) end)
+SlotTab:AddButton("Force Save",  function() ForceSave(slotSlider:Get()) end)
 SlotTab:AddSection("Land Option")
-SlotTab:AddButton("Free Land", FreeLand)
-SlotTab:AddButton("Max Land", function()
+SlotTab:AddButton("Free Land (TP to unclaimed)", FreeLand)
+SlotTab:AddButton("Teleport → My Base",          BaseHelp)
+SlotTab:AddButton("Expand Land (Max)",function()
     local pp = GetPropertyPurchasing(); if not pp then return end
     local evt = pp:FindFirstChild("ClientExpandedProperty")
     if evt and evt:IsA("RemoteEvent") then pcall(function() evt:FireServer() end) end
@@ -1445,26 +1375,26 @@ BuyTab:AddToggle("Auto Buy Loop",{Default=false},function(v)
     if v then StartAutoBuy(Flags.AutBuyItem, buyAmtSlider:Get()) else StopAutoBuy() end
 end)
 
--- DUPE TAB  (matches reference v2.9 layout)
+-- DUPE TAB
 local DupeTab = CreateTab("Dupe","📦")
 DupeTab:AddSection("Dupe")
--- Slider 1: Your Loaded Slot (the slot you currently have loaded = save target)
+DupeTab:AddLabel("1. Have axe in backpack, set slot = your saved slot")
+DupeTab:AddLabel("2. Click Dupe Axe → save + die")
+DupeTab:AddLabel("3. Place your land manually in LT2")
+DupeTab:AddLabel("4. Click Grab Tools to pick up dropped axe")
 local loadedSlotSlider = DupeTab:AddSlider("Your Loaded Slot",{Min=1,Max=3,Default=1,Step=1})
--- Slider 2: Slot to load after reset
 local slotToLoadSlider = DupeTab:AddSlider("Slot to load",{Min=1,Max=3,Default=1,Step=1})
--- Status display — wired to dupeStatusLbl used inside StartAxeDupe
-local _dsLbl = DupeTab:AddLabel("Status: Ready ✅")
-dupeStatusLbl = _dsLbl
+local _dLbl = DupeTab:AddLabel("Status: Ready ✅")
+dupeStatusLbl = _dLbl
 DupeTab:AddButton("Dupe Axe", function()
-    StartAxeDupe(loadedSlotSlider:Get(), slotToLoadSlider:Get())
+    -- Both sliders should match — loaded slot is what gets saved
+    StartAxeDupe(loadedSlotSlider:Get())
 end)
-DupeTab:AddSection("Base Dupe")
-DupeTab:AddLabel("Moves trees to dropoff → auto-chop there")
+DupeTab:AddButton("Grab Dropped Tools", GrabTools)
+DupeTab:AddSection("Wood")
 DupeTab:AddButton("Move Trees → Dropoff", DupeWood)
 DupeTab:AddButton("Sell Current Wood",    SellWood)
-DupeTab:AddSection("Item Tools")
-DupeTab:AddButton("Re-grab Dropped Tools", GrabTools)
-DupeTab:AddButton("Drop All Axes", DropAllAxes)
+DupeTab:AddButton("Drop All Axes",        DropAllAxes)
 
 -- MONEY TAB
 local MoneyTab = CreateTab("Money","💵")
