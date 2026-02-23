@@ -869,22 +869,28 @@ local function DropAllAxes()
     end
 end
 
--- loadedSlot = slot where your axe is already saved (Your Loaded Slot)
--- loadSlot   = slot to trigger the load/land screen from (Slot to load)
--- Both default to 1. Using the same slot is fine and is the standard method.
+-- ═══════════════════════════════════════════════════════════════════
+-- AXE DUPE — v9 FIXED
 --
--- WHY TWO SLOTS:
---   "Your Loaded Slot" is the save that contains your axe.
---   "Slot to load" is what RequestLoad fires with — this triggers the
---   character reset and land selection screen.
---   If both are the same (slot 1): save axe to 1, load slot 1 → land screen
---   fires, axe comes back from save, equipped axe also survived = 2.
+-- WHAT WAS WRONG (v9 original):
 --
--- THE CRITICAL KEY — AXE MUST BE IN HANDS (equipped) BEFORE LOAD:
---   RequestLoad resets the character. But if the tool is already in the
---   character model (equipped, showing in hands), it persists through
---   the reset on the client side. Then the load restores the saved axe
---   on top. Backpack tools do NOT survive — only equipped ones do.
+--   BUG 1 (critical): axe.Parent = char  is CLIENT-SIDE ONLY.
+--   Roblox FilteringEnabled means the server NEVER sees this "equip".
+--   When RequestLoad fires, the server resets char + Backpack and the
+--   axe disappears — it was never server-equipped to begin with.
+--   Result: land screen appears, you confirm, get 0 extra axes.
+--
+--   BUG 2: saveRF:InvokeServer(loadedSlot, LP) — passing LP as the
+--   second arg doesn't match LT2's actual RequestSave signature
+--   (slot number only). This caused silent save failures.
+--
+-- THE FIX — DROP AXE TO WORKSPACE BEFORE SAVE+LOAD:
+--   A Tool in Workspace is a server-replicated physical object.
+--   It is NOT cleared by character resets or RequestLoad.
+--   Flow: drop axe → save (empty backpack, that's fine) → load →
+--   confirm land → save restores axe to backpack → GrabTools()
+--   picks up the Workspace axe = 2 total.
+-- ═══════════════════════════════════════════════════════════════════
 local function StartAxeDupe(loadedSlot, loadSlot)
     if axeDupeRunning then warn("[JofferHub] Already running."); return end
     loadedSlot = loadedSlot or 1
@@ -898,50 +904,67 @@ local function StartAxeDupe(loadedSlot, loadSlot)
             warn("[JofferHub] No character."); axeDupeRunning = false; return
         end
 
-        -- ── STEP 1: Find axe and EQUIP IT (move to character hands) ──
-        -- This is the most important step. The axe must be IN the character
-        -- model (equipped/held), not sitting in the Backpack folder.
-        -- Equipped = survives the RequestLoad character reset.
-        -- Backpack = gets wiped by the load.
-        local axe = char:FindFirstChildWhichIsA("Tool")      -- already equipped?
+        -- ── STEP 1: Find axe (equipped or in backpack) ────────────────
+        local axe = char:FindFirstChildWhichIsA("Tool")
         if not axe then
-            axe = LP.Backpack:FindFirstChildWhichIsA("Tool") -- grab from backpack
+            axe = LP.Backpack:FindFirstChildWhichIsA("Tool")
         end
         if not axe then
-            warn("[JofferHub] No tool found! Buy/hold an axe first.")
+            warn("[JofferHub] No tool found! You need to own an axe first.")
             axeDupeRunning = false; return
         end
-        -- Force equip: parent to character (same as pressing the tool hotkey)
-        if axe.Parent ~= char then
-            axe.Parent = char
-            task.wait(0.5) -- give client a moment to register the equip
-        end
-        print("[JofferHub] Axe equipped: ["..axe.Name.."]")
+        print("[JofferHub] Found axe: ["..axe.Name.."]")
         print("[JofferHub] Loaded slot: "..loadedSlot.."  |  Load slot: "..loadSlot)
 
-        -- ── STEP 2: Save to the loaded slot WITH axe equipped ─────────
-        -- This records the state: player has this axe.
-        -- When RequestLoad fires later, this save is what gets restored.
+        -- ── STEP 2: DROP AXE INTO WORKSPACE (THE KEY FIX) ────────────
+        -- Tools in Workspace are server-replicated physical objects and
+        -- are NOT cleared by RequestLoad / character resets.
+        -- The old v9 approach of axe.Parent = char was client-side only
+        -- (FilteringEnabled) — the server destroyed it on reset every time.
+        axe.Parent = Workspace
+        local handle = axe:FindFirstChild("Handle")
+        if handle then
+            pcall(function()
+                handle.CFrame = hrp.CFrame * CFrame.new(math.random(-2,2), 0.5, math.random(-2,2))
+                handle.AssemblyLinearVelocity  = Vector3.zero
+                handle.AssemblyAngularVelocity = Vector3.zero
+                handle.Anchored = false
+            end)
+        end
+        print("[JofferHub] ✓ Axe dropped to Workspace (survives reset).")
+        task.wait(0.8) -- let server register the drop
+
+        -- ── STEP 3: Save slot (FIXED: no LP arg) ──────────────────────
+        -- Backpack is now empty — that's intentional. The load will
+        -- restore this save. The Workspace axe is the "extra" one.
+        -- FIX: removed ', LP' second argument that caused silent failures.
         local ls = GetLoadSave()
-        if not ls then warn("[JofferHub] LoadSaveRequests not found."); axeDupeRunning = false; return end
+        if not ls then
+            warn("[JofferHub] LoadSaveRequests not found.")
+            pcall(function() axe.Parent = LP.Backpack end)
+            axeDupeRunning = false; return
+        end
 
         local saveRF = ls:FindFirstChild("RequestSave")
         if not saveRF or not saveRF:IsA("RemoteFunction") then
-            warn("[JofferHub] RequestSave not found."); axeDupeRunning = false; return
+            warn("[JofferHub] RequestSave not found.")
+            pcall(function() axe.Parent = LP.Backpack end)
+            axeDupeRunning = false; return
         end
 
-        print("[JofferHub] (1/3) Saving axe to slot "..loadedSlot.."...")
+        print("[JofferHub] (1/3) Saving to slot "..loadedSlot.."...")
         local saveOk, saveRes = pcall(function()
-            return saveRF:InvokeServer(loadedSlot, LP)
+            return saveRF:InvokeServer(loadedSlot)  -- FIXED: no LP argument
         end)
         print("[JofferHub] Save → "..tostring(saveOk).." / "..tostring(saveRes))
         if not saveOk or saveRes == false then
             warn("[JofferHub] Save failed. Make sure you own a land plot.")
+            pcall(function() axe.Parent = LP.Backpack end) -- restore axe on fail
             axeDupeRunning = false; return
         end
-        task.wait(1.2) -- let server fully commit the save
+        task.wait(1.5) -- let server fully commit the save
 
-        -- ── STEP 3: Check load permission ─────────────────────────────
+        -- ── STEP 4: Check load permission ─────────────────────────────
         local mayRF = ls:FindFirstChild("ClientMayLoad")
         if not mayRF or not mayRF:IsA("RemoteFunction") then
             warn("[JofferHub] ClientMayLoad not found."); axeDupeRunning = false; return
@@ -951,34 +974,45 @@ local function StartAxeDupe(loadedSlot, loadSlot)
         local mayOk, mayRes = pcall(function() return mayRF:InvokeServer(LP) end)
         print("[JofferHub] MayLoad → "..tostring(mayOk).." / "..tostring(mayRes))
         if not mayOk or mayRes == false then
-            warn("[JofferHub] Load denied — wait a moment and try again.")
+            warn("[JofferHub] Load denied — wait ~10 seconds and try again.")
             axeDupeRunning = false; return
         end
 
-        -- ── STEP 4: Fire RequestLoad on the load slot ─────────────────
-        -- This triggers the character reset + land selection screen.
-        -- The axe in character hands (Step 1) SURVIVES this reset.
-        -- After confirming your land plot, the save from Step 2 restores
-        -- the axe into your backpack/hands = you now have 2 total.
+        -- ── STEP 5: Fire RequestLoad ───────────────────────────────────
+        -- Triggers character reset + land selection screen.
+        -- The axe in Workspace (Step 2) is NOT touched by this reset.
         local loadRF = ls:FindFirstChild("RequestLoad")
         if not loadRF or not loadRF:IsA("RemoteFunction") then
             warn("[JofferHub] RequestLoad not found."); axeDupeRunning = false; return
         end
 
         print("[JofferHub] (3/3) Loading slot "..loadSlot.."...")
-        print("[JofferHub] ★ Land selection screen will appear — confirm your plot to finish!")
-
+        print("[JofferHub] ★ CONFIRM THE LAND SELECTION SCREEN to finish the dupe!")
         pcall(function() loadRF:InvokeServer(loadSlot, LP, nil) end)
 
-        -- ── STEP 5: Wait for CharacterAdded + land confirm ────────────
+        -- ── STEP 6: Wait for respawn + land confirm ────────────────────
         LP.CharacterAdded:Wait()
-        task.wait(4) -- buffer for land screen confirmation + load settle
+        task.wait(5) -- buffer for land screen confirm + load settle
+
+        -- ── STEP 7: Grab the Workspace axe ────────────────────────────
+        -- Backpack now has the restored axe from the save (1 axe).
+        -- The original axe is still in Workspace nearby (1 axe).
+        -- GrabTools picks it up = 2 total.
+        print("[JofferHub] Grabbing Workspace axe...")
+        GrabTools(60) -- wider radius in case spawn point shifted
+        task.wait(0.5)
 
         local total = 0
         for _, t in ipairs(LP.Backpack:GetChildren()) do if t:IsA("Tool") then total += 1 end end
         local c2 = GetChar()
         if c2 then for _, t in ipairs(c2:GetChildren()) do if t:IsA("Tool") then total += 1 end end end
-        print("[JofferHub] Done! Tools now: "..total..". Run again to stack more.")
+
+        if total >= 2 then
+            print("[JofferHub] ✓✓ DUPE SUCCESS! Total tools: "..total.." — run again to stack more!")
+        else
+            warn("[JofferHub] Only "..total.." tool(s) found. Workspace axe may have landed"
+              .." out of range. Run 'Grab Nearby Tools' manually, or walk to your original spot.")
+        end
         axeDupeRunning = false
     end)
 end
