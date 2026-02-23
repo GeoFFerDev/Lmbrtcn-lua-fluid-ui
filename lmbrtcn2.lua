@@ -6,7 +6,7 @@
      ███████╗    ██║   ███████╗     ███████╗██╔╝ ██╗██║     ███████╗╚██████╔╝██║   ██║
      ╚══════╝    ╚═╝   ╚══════╝     ╚══════╝╚═╝  ╚═╝╚═╝     ╚══════╝ ╚═════╝ ╚═╝   ╚═╝
 
-    Lumber Tycoon 2  |  FULLY FIXED v4.0  |  Toggle: RightCtrl  |  Mobile: tap floating icon
+    Lumber Tycoon 2  |  FULLY FIXED v6.0  |  Toggle: RightCtrl  |  Mobile: tap floating icon
 
     ── KEY FIXES (from deep RBXLX analysis) ──────────────────────────────────────────────
     1. SELLING:   Wood sell uses SELLWOOD part at (255.7, 3.9, 66.1) — a thin 0.2×1.8×5.4
@@ -520,17 +520,21 @@ end)
 -- Problem: Plain hrp.CFrame= sometimes fails or rubber-bands.
 -- Fix: zero velocity, disable physics, set CFrame in a loop until confirmed.
 -- ═══════════════════════════════════════════════════════════════════
--- ── SAFE TELEPORT — FIXED ────────────────────────────────────────
--- Temporarily enables noclip-style CanCollide=false on limbs so that
--- the player doesn't get stuck inside terrain/geometry after TP.
--- This is critical for biome TPs (snow, swamp, volcano, mountain).
+-- ── SAFE TELEPORT — v6 ───────────────────────────────────────────
+-- Handles terrain clipping by:
+-- 1. Disabling CanCollide on all character BaseParts during TP
+--    (fixes collision with PARTS, walls, structures)
+-- 2. Teleporting 8 studs ABOVE the target position
+--    (gives clearance above terrain since terrain ignores CanCollide)
+-- 3. Re-enabling collision after 0.5s so physics settles naturally
+-- 4. Zeroing velocity before and after to prevent rubber-banding
 local function SafeTeleport(cf, retries)
     retries = retries or 3
     local hrp = GetHRP()
     local char = GetChar()
     if not hrp or not char then return end
 
-    -- Temporarily disable collision on all character parts to avoid terrain clip
+    -- Step 1: Disable collision on all character parts (avoids clipping into parts/structures)
     local collidable = {}
     for _, part in ipairs(char:GetDescendants()) do
         if part:IsA("BasePart") and part.CanCollide then
@@ -539,61 +543,71 @@ local function SafeTeleport(cf, retries)
         end
     end
 
+    -- Step 2: Teleport to target + 8 studs above (terrain clearance)
+    -- Gravity will bring the player down to the correct surface
+    local safeCF = cf + Vector3.new(0, 8, 0)
+
     for i = 1, retries do
         pcall(function()
             hrp.AssemblyLinearVelocity  = Vector3.zero
             hrp.AssemblyAngularVelocity = Vector3.zero
-            hrp.CFrame = cf
+            hrp.CFrame = safeCF
         end)
         task.wait(0.15)
-        if (hrp.Position - cf.Position).Magnitude < 12 then break end
+        if (hrp.Position - safeCF.Position).Magnitude < 15 then break end
     end
 
-    -- Re-enable collision after a short delay (let physics settle first)
-    task.delay(0.4, function()
+    -- Step 3: Re-enable collision after physics settles (0.5s)
+    task.delay(0.5, function()
         for part in pairs(collidable) do
             pcall(function() part.CanCollide = true end)
         end
+        -- Final velocity zero to prevent post-TP drift
+        pcall(function()
+            local h = GetHRP()
+            if h then
+                h.AssemblyLinearVelocity = Vector3.zero
+            end
+        end)
     end)
 end
 
 -- ── WAYPOINTS (all positions confirmed from RBXLX CFrame data) ───
--- ── WAYPOINTS — ALL VERIFIED FROM RBXLX ─────────────────────────
--- Store_WoodRUs part: (301.7, 13.8, 57.5)   → player Y = 13.8 + 10 = 23.8
--- Store_Land part:    (284.1, 8.5, -99.5)   → player Y = 8.5 + 10 = 18.5
--- Store_Cars part:    (508.6, 10.0, -1445)   → player Y = 10 + 10 = 20
--- Store_Furniture:    (507.6, 15.0, -1768.5) → player Y = 15 + 10 = 25
--- WOODDROPOFF:        (322.5, 11.0, 97.1)    → player Y = 11 + 5 = 16
--- SELLWOOD:           (255.7, 3.9,  66.1)    → player Y = 3.9 + 5 = 8.9
--- Snow biome:         terrain surface ~Y=52   → player Y = 75 (safely above snow)
--- Swamp biome:        terrain Y ~125-138      → player Y = 155
--- Volcano biome:      core at (-1684, 379, 1109) → player Y = 420
--- Tropics:            region at X=4214-4876   → player Y = 20
+-- ── WAYPOINTS — FULLY CORRECTED v6 ───────────────────────────────
+-- ROOT CAUSE OF WHITE SAND BUG: Player PLOTS (property baseplates) float
+-- at Y~12-25 above the main area. Old Y=19-24 for stores landed players
+-- ON these floating plot pads instead of inside the actual stores.
+--
+-- Actual store floors are at Y~0.3. Player HRP is ~3 studs above feet,
+-- so correct TP Y = floor_Y + 4 = ~5 for all ground-level locations.
+--
+-- CONFIRMED POSITIONS FROM RBXLX:
+-- WoodRUs floor parts:  Y~0.3  → player Y=5, Z=30 (inside near entrance)
+-- Land Store floor:     Y~0.3  → player Y=5, Z=-80 (inside near entrance)
+-- WOODDROPOFF part:     Y=11.0 → player Y=16 (elevated dock)
+-- SELLWOOD part:        Y=3.91 → player Y=8 (slight elevation)
+-- Store_Cars region:    Y=10   → player Y=15
+-- Store_Furniture:      Y=15   → player Y=20
+-- Snow terrain:         Y~52   → player Y=75 (above snow surface)
+-- Swamp trees:          Y~125-138 → player Y=155
+-- Volcano region:       Y~380  → player Y=420
+-- Tropics region:       X=4214-4876, Y~14 → player Y=20
 local Locations = {
-    ["Spawn"]             = CFrame.new(163,    5,     58),
-    ["Main Forest"]       = CFrame.new(300,   10,   -200),
-    -- WOODDROPOFF confirmed at (322.5, 11.0, 97.1)
-    ["Wood Dropoff"]      = CFrame.new(322.5,  16,   97.1),
-    -- SELLWOOD confirmed at (255.7, 3.9, 66.1)
-    ["Sell Wood"]         = CFrame.new(258,     8,   66.1),
-    -- Store_WoodRUs confirmed at (301.7, 13.8, 57.5)
-    ["Wood R' Us"]        = CFrame.new(301.7,  24,   57.5),
-    -- Store_Land confirmed at (284.1, 8.5, -99.5)
-    ["Land Store"]        = CFrame.new(284.1,  19,  -99.5),
-    -- Store_Cars confirmed at (508.6, 10.0, -1445) — NOT near spawn!
-    ["Car Store"]         = CFrame.new(508.6,  20, -1445),
-    -- Store_Furniture confirmed at (507.6, 15.0, -1768.5)
-    ["Fancy Furnishings"] = CFrame.new(507.6,  25, -1768.5),
-    -- Snow biome: terrain surface ~Y=52, go to Y=75 to spawn above snow
-    ["Snow Biome"]        = CFrame.new(1127,   75,  1882),
-    -- Volcano biome: region_volcano center ~(-1684, 379, 1109)
-    ["Volcano Biome"]     = CFrame.new(-1684, 420,  1109),
-    -- Swamp biome: trees at Y~125-138, go Y=155
-    ["Swamp Biome"]       = CFrame.new(-1137, 155,  -996),
-    -- Tropics / Ferry: region at X=4214-4876, Y=14
-    ["Tropics / Ferry"]   = CFrame.new(4500,   20,   -80),
-    -- Mountain biome: Y based on region_mountain
-    ["Mountain"]          = CFrame.new(-862,  200,   -46),
+    -- Main area (floor at Y~0): player TP Y=5 for all ground stores
+    ["Spawn"]             = CFrame.new(163,    5,    58),
+    ["Main Forest"]       = CFrame.new(300,    5,  -200),
+    ["Wood Dropoff"]      = CFrame.new(322.5,  16,   97.1),  -- elevated dock Y=11
+    ["Sell Wood"]         = CFrame.new(258,     8,   66.1),  -- SELLWOOD at Y=3.9
+    ["Wood R' Us"]        = CFrame.new(301.7,   5,   30),   -- inside store, floor Y~0.3
+    ["Land Store"]        = CFrame.new(284,     5,  -80),    -- inside store, floor Y~0.3
+    ["Car Store"]         = CFrame.new(508.6,  15, -1445),   -- Store_Cars region Y=10
+    ["Fancy Furnishings"] = CFrame.new(507.6,  20, -1768.5), -- Store_Furniture Y=15
+    -- Biomes (player TP above terrain to avoid clipping):
+    ["Snow Biome"]        = CFrame.new(1127,   75,  1882),   -- terrain Y~52, TP Y=75
+    ["Volcano Biome"]     = CFrame.new(-1684, 420,  1109),   -- above volcano
+    ["Swamp Biome"]       = CFrame.new(-1137, 155,  -996),   -- trees at Y~125-138
+    ["Tropics / Ferry"]   = CFrame.new(4500,   20,   -80),   -- Tropics region
+    ["Mountain"]          = CFrame.new(-862,  200,   -46),   -- mountain ridge
 }
 local function TeleportTo(name)
     local cf = Locations[name]
@@ -1334,19 +1348,20 @@ WorldTab:AddToggle("No Fog",{Default=false},function(v)
     else Lighting.FogEnd=1000; Lighting.FogStart=0 end
 end)
 WorldTab:AddToggle("Shadows",{Default=true},function(v) Lighting.GlobalShadows=v end)
-WorldTab:AddSection("Teleport")
-local locOpts = {}; for name in pairs(Locations) do table.insert(locOpts, name) end
-local locDrop = WorldTab:AddDropdown("Select Location",{Options=locOpts,Default=locOpts[1]})
-WorldTab:AddButton("Teleport ▶",function() TeleportTo(locDrop:Get()) end)
 WorldTab:AddSection("Quick Teleport")
+WorldTab:AddButton("→ Spawn",           function() TeleportTo("Spawn") end)
 WorldTab:AddButton("→ Wood Dropoff",    function() TeleportTo("Wood Dropoff") end)
 WorldTab:AddButton("→ Sell Wood Zone",  function() TeleportTo("Sell Wood") end)
 WorldTab:AddButton("→ Wood R' Us",      function() TeleportTo("Wood R' Us") end)
 WorldTab:AddButton("→ Land Store",      function() TeleportTo("Land Store") end)
-WorldTab:AddButton("→ Snow Biome",      function() TeleportTo("Snow Biome") end) -- Y=75, above terrain
+WorldTab:AddButton("→ Car Store",       function() TeleportTo("Car Store") end)
+WorldTab:AddButton("→ Fancy Furnishings",function() TeleportTo("Fancy Furnishings") end)
+WorldTab:AddButton("→ Main Forest",     function() TeleportTo("Main Forest") end)
+WorldTab:AddButton("→ Snow Biome",      function() TeleportTo("Snow Biome") end)
 WorldTab:AddButton("→ Volcano Biome",   function() TeleportTo("Volcano Biome") end)
 WorldTab:AddButton("→ Swamp Biome",     function() TeleportTo("Swamp Biome") end)
 WorldTab:AddButton("→ Tropics / Ferry", function() TeleportTo("Tropics / Ferry") end)
+WorldTab:AddButton("→ Mountain",        function() TeleportTo("Mountain") end)
 WorldTab:AddSection("Teleport to Player")
 local allP = {}
 for _, p in ipairs(Players:GetPlayers()) do
