@@ -623,32 +623,57 @@ local function GetTreeClass(model)
     return "Generic"
 end
 
--- Get all wood BaseParts (pieces on the map, not inside tree models)
--- These are the cut/processed wood pieces that can be sold.
--- After cutting, WoodSection parts end up directly in Workspace or a plot.
+-- ═══════════════════════════════════════════════════════════════════
+-- GET WOOD PIECES
+-- Root cause of "TP Wood to Me sends me outside map" was that
+-- GetWoodPieces was picking up:
+--   • Player HumanoidRootPart (Model parent, no BindableEvent, size>1 ✓ → passed all filters)
+--   • Other players' limbs
+--   • Store floor/wall parts (unanchored decorations)
+--
+-- Correct filters:
+--   1. Skip ALL parts inside any player's Character model
+--   2. Skip ANCHORED parts (map structures are anchored; loose wood is not)
+--   3. Skip everything in the Properties folder (plot bases/structures)
+--   4. Only keep parts in Workspace root or a plain Model (no BindableEvent)
+--   5. Size.Magnitude > 1.5
+-- ═══════════════════════════════════════════════════════════════════
 local function GetWoodPieces()
     local list = {}
+
+    -- Build set of all player Character models to exclude their parts
+    local charModels = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Character then charModels[p.Character] = true end
+    end
+
+    local propsFolder = Workspace:FindFirstChild("Properties")
+
     for _, v in ipairs(Workspace:GetDescendants()) do
-        if v:IsA("BasePart") then
-            local p = v.Parent
-            -- Wood pieces are BaseParts whose parent is Workspace, or a Model that
-            -- does NOT have a BindableEvent (i.e. already cut, not a standing tree).
-            -- We also look for parts with WoodSection-like names if Clean2 hasn't renamed yet.
-            local parentIsWS = (p == Workspace)
-            local parentIsModel = p and p:IsA("Model")
-            local parentHasCutEvent = false
-            if parentIsModel then
-                for _, c in ipairs(p:GetChildren()) do
-                    if c:IsA("BindableEvent") then parentHasCutEvent = true; break end
-                end
+        if not v:IsA("BasePart") then continue end
+        if v.Anchored then continue end               -- anchored = map structure, not wood
+        if v.Size.Magnitude < 1.5 then continue end   -- ignore tiny decorations
+
+        -- Skip character parts (THIS was causing the player to get flung)
+        local parentModel = v:FindFirstAncestorOfClass("Model")
+        if parentModel and charModels[parentModel] then continue end
+
+        -- Skip plot bases and player structures
+        if propsFolder and v:IsDescendantOf(propsFolder) then continue end
+
+        -- Include only if parent is Workspace root, or a plain Model with no BindableEvent
+        local par = v.Parent
+        local parentIsWS = (par == Workspace)
+        local parentIsModel = par and par:IsA("Model")
+        local parentHasBE = false
+        if parentIsModel then
+            for _, c in ipairs(par:GetChildren()) do
+                if c:IsA("BindableEvent") then parentHasBE = true; break end
             end
-            -- Only collect if NOT a standing tree part
-            if parentIsWS or (parentIsModel and not parentHasCutEvent) then
-                -- Additional filter: check it has some mass / not a tiny decoration
-                if v.Size.Magnitude > 1 then
-                    table.insert(list, v)
-                end
-            end
+        end
+
+        if parentIsWS or (parentIsModel and not parentHasBE) then
+            table.insert(list, v)
         end
     end
     return list
@@ -917,19 +942,20 @@ end
 -- ═══════════════════════════════════════════════════════════════════
 -- AXE DUPE
 --
--- CORRECT FLOW (manual land placement required):
+-- CORRECT FLOW:
 --   1. RequestSave(slot)  → server saves inventory WITH your axe
---   2. Humanoid.Health=0  → character dies, axe drops to ground
---      ** Script stops here — DO NOT auto-call RequestLoad **
---   3. LT2 shows the land placement grid — YOU place your land manually
---   4. When you confirm placement, LT2 server automatically loads
---      your last save → gives you back the axe from the save
---   5. Click "Grab Dropped Tools" to pick up the axe still on the ground
---   Result: ground axe + loaded axe = DOUBLED. Repeat after 65s cooldown.
+--   2. Record current position (where axes will drop)
+--   3. Humanoid.Health = 0  → character dies, axe drops at recorded pos
+--   4. Wait for respawn
+--   5. TP back to death position (so axes are right next to you)
+--   6. Show land-placement instructions — user places land manually
+--   7. LT2 server auto-loads save on land confirm → axe back in inventory
+--   8. User clicks "Grab All Tools" → picks up dropped axe from step 3
+--   Result: 1 axe in backpack + 1 axe grabbed from floor = DOUBLED
 --
--- WHY NO AUTO-LOAD: Calling RequestLoad before land is confirmed
---   breaks LT2's state machine → camera freeze / stuck in limbo.
---   The server handles the load automatically on land confirmation.
+-- IMPORTANT: Do NOT call RequestLoad or SelectLoadPlot — these break
+--   LT2's state machine and freeze the camera. The save loads
+--   automatically when the player confirms land placement.
 -- ═══════════════════════════════════════════════════════════════════
 local AXE_DUPE_CD  = 65
 local dupeSaveTime = 0
@@ -942,18 +968,15 @@ local function SetDupeStatus(msg)
 end
 
 local function StartAxeDupe(slotNum)
-    if dupeRunning then
-        SetDupeStatus("⚠ Already running")
-        return
-    end
+    if dupeRunning then SetDupeStatus("⚠ Already running"); return end
+
     local remaining = math.ceil(AXE_DUPE_CD - (tick() - dupeSaveTime))
     if remaining > 0 then
         SetDupeStatus("⏳ Cooldown — wait " .. remaining .. "s")
         return
     end
 
-    -- Must have at least one tool
-    local char = GetChar(); if not char then SetDupeStatus("❌ No character") return end
+    local char = GetChar(); if not char then SetDupeStatus("❌ No character"); return end
     local hasTool = char:FindFirstChildOfClass("Tool") or LP.Backpack:FindFirstChildOfClass("Tool")
     if not hasTool then
         SetDupeStatus("❌ No axe in backpack — buy one first!")
@@ -966,39 +989,48 @@ local function StartAxeDupe(slotNum)
         -- STEP 1: Save slot
         SetDupeStatus("💾 Saving slot " .. slotNum .. "...")
         local ls = GetLoadSave()
-        if not ls then
-            SetDupeStatus("❌ LoadSaveRequests folder not found")
-            dupeRunning = false; return
-        end
+        if not ls then SetDupeStatus("❌ LoadSaveRequests not found"); dupeRunning=false; return end
         local saveRF = ls:FindFirstChild("RequestSave")
-        if not saveRF then
-            SetDupeStatus("❌ RequestSave not found")
-            dupeRunning = false; return
-        end
-        local ok = pcall(function() saveRF:InvokeServer(slotNum) end)
-        if not ok then
-            SetDupeStatus("❌ Save failed (still on cooldown?)")
+        if not saveRF then SetDupeStatus("❌ RequestSave RF not found"); dupeRunning=false; return end
+
+        local saveOk, saveResult = pcall(function() return saveRF:InvokeServer(slotNum) end)
+        print("[AxeDupe] RequestSave result: ok=" .. tostring(saveOk) .. " result=" .. tostring(saveResult))
+        if not saveOk then
+            SetDupeStatus("❌ Save error — still on cooldown?")
             dupeRunning = false; return
         end
         dupeSaveTime = tick()
-        task.wait(0.4)
-
-        -- STEP 2: Kill character — tools fall to the ground
-        SetDupeStatus("💀 Dying — axes drop to ground...")
-        local hum = GetHum()
-        if hum then
-            pcall(function() hum.Health = 0 end)
-        end
         task.wait(0.5)
 
-        -- DONE — tell user what to do next
-        SetDupeStatus("📍 Place your land → then click Grab Tools!")
+        -- STEP 2: Record drop position before dying
+        local dropPos = GetHRP() and GetHRP().Position or Vector3.new(163, 5, 58)
+        local dropCF   = CFrame.new(dropPos + Vector3.new(0, 3, 0))
+
+        -- STEP 3: Kill — axes fall to dropPos
+        SetDupeStatus("💀 Dying... axes dropping at your location")
+        local hum = GetHum()
+        if hum then pcall(function() hum.Health = 0 end) end
+
+        -- STEP 4: Wait for respawn (new character added)
+        SetDupeStatus("⏳ Waiting for respawn...")
+        local timer = 0
+        repeat task.wait(0.4); timer = timer + 0.4 until (GetHum() and GetHRP()) or timer > 12
+
+        task.wait(1)   -- let LT2 land-placement UI load fully
+
+        -- STEP 5: TP back to drop location so axes are right next to player
+        SetDupeStatus("📍 Back at drop zone — NOW place your land in LT2")
+        SafeTeleport(dropCF)
+        task.wait(0.5)
+
+        -- STEP 6: Wait instructions
+        SetDupeStatus("✅ Place land in LT2 → save auto-loads → click Grab All Tools!")
         dupeRunning = false
 
-        -- Cooldown countdown
+        -- Cooldown display
         for i = AXE_DUPE_CD, 1, -1 do
             task.wait(1)
-            SetDupeStatus("⏳ Cooldown: " .. i .. "s  (place land then Grab Tools)")
+            SetDupeStatus("⏳ " .. i .. "s cooldown  |  place land then Grab All Tools")
         end
         SetDupeStatus("✅ Ready to dupe again!")
     end)
@@ -1027,17 +1059,26 @@ end
 
 -- ═══════════════════════════════════════════════════════════════════
 -- GRAB TOOLS
+-- Searches ALL of Workspace for loose Tools (not inside any character).
+-- No distance limit — needed for dupe where axes fall at death location
+-- which may be far from where the player respawns.
 -- ═══════════════════════════════════════════════════════════════════
 local function GrabTools()
-    local hrp = GetHRP(); if not hrp then return end
+    local charModels = {}
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p.Character then charModels[p.Character] = true end
+    end
+
+    local grabbed = 0
     for _, v in ipairs(Workspace:GetDescendants()) do
-        if v:IsA("Tool") and not v.Parent:IsA("Model") then
-            local h = v:FindFirstChild("Handle")
-            if h and (hrp.Position - h.Position).Magnitude < 30 then
-                pcall(function() v.Parent = LP.Backpack end)
-            end
+        if v:IsA("Tool") then
+            local ancestor = v:FindFirstAncestorOfClass("Model")
+            if ancestor and charModels[ancestor] then continue end  -- skip equipped tools
+            pcall(function() v.Parent = LP.Backpack end)
+            grabbed = grabbed + 1
         end
     end
+    print("[LT2 Hub] GrabTools: grabbed " .. grabbed .. " tool(s)")
 end
 
 -- ═══════════════════════════════════════════════════════════════════
@@ -1073,18 +1114,40 @@ local function BaseHelp()
 end
 
 local function FreeLand()
+    -- Build set of currently connected players so we don't mistake
+    -- abandoned plots (owner disconnected → Value=nil) for unclaimed ones
+    local activePlayers = {}
+    for _, p in ipairs(Players:GetPlayers()) do activePlayers[p] = true end
+
     local props = Workspace:FindFirstChild("Properties")
-    if not props then return end
+    if not props then warn("[LT2 Hub] Properties folder not found"); return end
+
     for _, plot in ipairs(props:GetChildren()) do
         local ow = plot:FindFirstChild("Owner")
-        if ow and not ow.Value then
-            local origin = plot:FindFirstChild("OriginSquare") or plot:FindFirstChild("Square")
-            if origin and origin:IsA("BasePart") then
-                -- Just TP to the unclaimed plot — user clicks to confirm in LT2 UI naturally
-                SafeTeleport(CFrame.new(origin.Position + Vector3.new(0, 10, 0)))
-                print("[LT2 Hub] Teleported to unclaimed plot — confirm in LT2 menu")
-                return
+        if not ow then continue end
+
+        -- Truly unclaimed: Owner exists, Value is nil, AND no active player is using it
+        -- (rules out disconnected-player plots where Value also becomes nil)
+        local ownerVal = ow.Value
+        if ownerVal ~= nil then continue end  -- skip owned plots
+
+        -- Double-check: look for a PlayerUserId value inside the plot
+        -- In LT2 some plots store the owner UserId even after disconnect
+        local uidVal = plot:FindFirstChild("PlayerUserId") or plot:FindFirstChild("OwnerUserId")
+        if uidVal and uidVal.Value and uidVal.Value ~= 0 then
+            -- Has a stored UserId — check if that player is still online
+            local stillOnline = false
+            for _, p in ipairs(Players:GetPlayers()) do
+                if p.UserId == uidVal.Value then stillOnline = true; break end
             end
+            if not stillOnline then continue end  -- abandoned plot, skip
+        end
+
+        local origin = plot:FindFirstChild("OriginSquare") or plot:FindFirstChild("Square") or plot:FindFirstChildWhichIsA("BasePart")
+        if origin and origin:IsA("BasePart") then
+            SafeTeleport(CFrame.new(origin.Position + Vector3.new(0, 10, 0)))
+            print("[LT2 Hub] Teleported to unclaimed plot at " .. tostring(origin.Position))
+            return
         end
     end
     warn("[LT2 Hub] No unclaimed plots found.")
@@ -1270,10 +1333,21 @@ SlotTab:AddButton("Force Save",  function() ForceSave(slotSlider:Get()) end)
 SlotTab:AddSection("Land Option")
 SlotTab:AddButton("Free Land (TP to unclaimed)", FreeLand)
 SlotTab:AddButton("Teleport → My Base",          BaseHelp)
-SlotTab:AddButton("Expand Land (Max)",function()
-    local pp = GetPropertyPurchasing(); if not pp then return end
-    local evt = pp:FindFirstChild("ClientExpandedProperty")
-    if evt and evt:IsA("RemoteEvent") then pcall(function() evt:FireServer() end) end
+SlotTab:AddButton("Max Land (Buy from store)", function()
+    -- ClientExpandedProperty is a server→client event, not something we fire.
+    -- Max land is purchased via AttemptPurchase at the Land Store.
+    -- TP to Land Store first, then purchase the largest plot upgrade.
+    SafeTeleport(CFrame.new(284, 5, -80))
+    task.wait(1.2)
+    local c2s = GetTransactionsC2S()
+    if c2s then
+        local rf = c2s:FindFirstChild("AttemptPurchase")
+        if rf and rf:IsA("RemoteFunction") then
+            -- Try common LT2 land upgrade item names
+            local ok, result = pcall(function() return rf:InvokeServer("LandExpansion") end)
+            print("[LT2 Hub] Max Land purchase result:", tostring(ok), tostring(result))
+        end
+    end
 end)
 SlotTab:AddSection("Steal Plot")
 local stealOpts = {}
@@ -1377,20 +1451,21 @@ end)
 
 -- DUPE TAB
 local DupeTab = CreateTab("Dupe","📦")
-DupeTab:AddSection("Dupe")
-DupeTab:AddLabel("1. Have axe in backpack, set slot = your saved slot")
-DupeTab:AddLabel("2. Click Dupe Axe → save + die")
-DupeTab:AddLabel("3. Place your land manually in LT2")
-DupeTab:AddLabel("4. Click Grab Tools to pick up dropped axe")
+DupeTab:AddSection("Axe Dupe")
+DupeTab:AddLabel("1. Have axe in backpack")
+DupeTab:AddLabel("2. Set slot = the slot you last saved to")
+DupeTab:AddLabel("3. Click Dupe Axe — it saves then kills you")
+DupeTab:AddLabel("4. Script TPs you back to drop zone")
+DupeTab:AddLabel("5. Place your land in LT2 (save loads auto)")
+DupeTab:AddLabel("6. Click 'Grab ALL Tools' — axes doubled!")
 local loadedSlotSlider = DupeTab:AddSlider("Your Loaded Slot",{Min=1,Max=3,Default=1,Step=1})
 local slotToLoadSlider = DupeTab:AddSlider("Slot to load",{Min=1,Max=3,Default=1,Step=1})
 local _dLbl = DupeTab:AddLabel("Status: Ready ✅")
 dupeStatusLbl = _dLbl
-DupeTab:AddButton("Dupe Axe", function()
-    -- Both sliders should match — loaded slot is what gets saved
+DupeTab:AddButton("🪓 Dupe Axe", function()
     StartAxeDupe(loadedSlotSlider:Get())
 end)
-DupeTab:AddButton("Grab Dropped Tools", GrabTools)
+DupeTab:AddButton("📦 Grab ALL Tools (use after land placed)", GrabTools)
 DupeTab:AddSection("Wood")
 DupeTab:AddButton("Move Trees → Dropoff", DupeWood)
 DupeTab:AddButton("Sell Current Wood",    SellWood)
