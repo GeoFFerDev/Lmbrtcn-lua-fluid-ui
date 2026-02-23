@@ -6,7 +6,7 @@
      ███████╗    ██║   ███████╗     ███████╗██╔╝ ██╗██║     ███████╗╚██████╔╝██║   ██║
      ╚══════╝    ╚═╝   ╚══════╝     ╚══════╝╚═╝  ╚═╝╚═╝     ╚══════╝ ╚═════╝ ╚═╝   ╚═╝
 
-    Lumber Tycoon 2  |  Joffer Hub v8.0  |  Toggle: RightCtrl  |  Mobile: tap LT icon
+    Lumber Tycoon 2  |  Joffer Hub v9.0  |  Toggle: RightCtrl  |  Mobile: tap LT icon
 
     ── v7 FIX NOTES ────────────────────────────────────────────────────────────────────
     AXE DUPE (completely rewritten):
@@ -194,7 +194,7 @@ New("Frame", {Size=UDim2.new(1,0,0,1), Position=UDim2.new(0,0,1,-1), BackgroundC
 local dot = New("Frame", {Size=UDim2.new(0,7,0,7), Position=UDim2.new(0,12,0.5,-3), BackgroundColor3=T.Accent, BorderSizePixel=0, ZIndex=7, Parent=TBar})
 Corner(dot, UDim.new(1,0))
 New("TextLabel", {Text="LT2 Exploit", Size=UDim2.new(0,120,1,0), Position=UDim2.new(0,26,0,0), BackgroundTransparency=1, Font=Enum.Font.GothamBold, TextSize=14, TextColor3=T.TextPri, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7, Parent=TBar})
-New("TextLabel", {Text="Joffer Hub v8.0  •  #13822889", Size=UDim2.new(0,200,1,0), Position=UDim2.new(0,152,0,0), BackgroundTransparency=1, Font=Enum.Font.Gotham, TextSize=10, TextColor3=T.Accent, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7, Parent=TBar})
+New("TextLabel", {Text="Joffer Hub v9.0  •  #13822889", Size=UDim2.new(0,200,1,0), Position=UDim2.new(0,152,0,0), BackgroundTransparency=1, Font=Enum.Font.Gotham, TextSize=10, TextColor3=T.Accent, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7, Parent=TBar})
 MakeDraggable(TBar, Main)
 
 local CloseBtn = New("TextButton", {Text="✕", Size=UDim2.new(0,28,0,28), Position=UDim2.new(1,-34,0.5,-14), BackgroundColor3=Color3.fromRGB(185,55,55), BackgroundTransparency=0.35, Font=Enum.Font.GothamBold, TextSize=12, TextColor3=T.TextPri, BorderSizePixel=0, ZIndex=8, Parent=TBar})
@@ -869,39 +869,59 @@ local function DropAllAxes()
     end
 end
 
-local function StartAxeDupe(dupeSlot)
+-- loadedSlot = slot where your axe is already saved (Your Loaded Slot)
+-- loadSlot   = slot to trigger the load/land screen from (Slot to load)
+-- Both default to 1. Using the same slot is fine and is the standard method.
+--
+-- WHY TWO SLOTS:
+--   "Your Loaded Slot" is the save that contains your axe.
+--   "Slot to load" is what RequestLoad fires with — this triggers the
+--   character reset and land selection screen.
+--   If both are the same (slot 1): save axe to 1, load slot 1 → land screen
+--   fires, axe comes back from save, equipped axe also survived = 2.
+--
+-- THE CRITICAL KEY — AXE MUST BE IN HANDS (equipped) BEFORE LOAD:
+--   RequestLoad resets the character. But if the tool is already in the
+--   character model (equipped, showing in hands), it persists through
+--   the reset on the client side. Then the load restores the saved axe
+--   on top. Backpack tools do NOT survive — only equipped ones do.
+local function StartAxeDupe(loadedSlot, loadSlot)
     if axeDupeRunning then warn("[JofferHub] Already running."); return end
-    dupeSlot = dupeSlot or 1
+    loadedSlot = loadedSlot or 1
+    loadSlot   = loadSlot   or 1
     axeDupeThread = task.spawn(function()
         axeDupeRunning = true
 
-        -- ── STEP 1: Find and EQUIP the axe ───────────────────────────
-        -- CRITICAL: axe must be equipped (in character) not just backpack.
-        -- Equipped tools survive the character reset during load.
-        -- Backpack tools do NOT survive — they are cleared by the load.
         local char = GetChar()
         local hrp  = GetHRP()
         if not char or not hrp then
             warn("[JofferHub] No character."); axeDupeRunning = false; return
         end
 
-        local axe = char:FindFirstChildWhichIsA("Tool")   -- already equipped?
-        if not axe then axe = LP.Backpack:FindFirstChildWhichIsA("Tool") end  -- try backpack
+        -- ── STEP 1: Find axe and EQUIP IT (move to character hands) ──
+        -- This is the most important step. The axe must be IN the character
+        -- model (equipped/held), not sitting in the Backpack folder.
+        -- Equipped = survives the RequestLoad character reset.
+        -- Backpack = gets wiped by the load.
+        local axe = char:FindFirstChildWhichIsA("Tool")      -- already equipped?
         if not axe then
-            warn("[JofferHub] No tool found! Equip an axe first.")
+            axe = LP.Backpack:FindFirstChildWhichIsA("Tool") -- grab from backpack
+        end
+        if not axe then
+            warn("[JofferHub] No tool found! Buy/hold an axe first.")
             axeDupeRunning = false; return
         end
-
-        -- Equip: move to character so it shows in hands
+        -- Force equip: parent to character (same as pressing the tool hotkey)
         if axe.Parent ~= char then
             axe.Parent = char
-            task.wait(0.4)
+            task.wait(0.5) -- give client a moment to register the equip
         end
-        print("[JofferHub] Duping ["..axe.Name.."]  using slot "..dupeSlot)
+        print("[JofferHub] Axe equipped: ["..axe.Name.."]")
+        print("[JofferHub] Loaded slot: "..loadedSlot.."  |  Load slot: "..loadSlot)
 
-        -- ── STEP 2: Save current state to the chosen slot ────────────
-        -- This saves with the axe equipped — so the load will restore it.
-        -- Signature from decompiled saveSlot(): InvokeServer(slotNum, LP)
+        -- ── STEP 2: Save to the loaded slot WITH axe equipped ─────────
+        -- This records the state: player has this axe.
+        -- When RequestLoad fires later, this save is what gets restored.
         local ls = GetLoadSave()
         if not ls then warn("[JofferHub] LoadSaveRequests not found."); axeDupeRunning = false; return end
 
@@ -910,18 +930,18 @@ local function StartAxeDupe(dupeSlot)
             warn("[JofferHub] RequestSave not found."); axeDupeRunning = false; return
         end
 
-        print("[JofferHub] (1/3) Saving to slot "..dupeSlot.."...")
-        local saveOk, saveRes = pcall(function() return saveRF:InvokeServer(dupeSlot, LP) end)
-        print("[JofferHub] Save → ok="..tostring(saveOk).." res="..tostring(saveRes))
+        print("[JofferHub] (1/3) Saving axe to slot "..loadedSlot.."...")
+        local saveOk, saveRes = pcall(function()
+            return saveRF:InvokeServer(loadedSlot, LP)
+        end)
+        print("[JofferHub] Save → "..tostring(saveOk).." / "..tostring(saveRes))
         if not saveOk or saveRes == false then
-            warn("[JofferHub] Save failed. Make sure you own a land plot first.")
+            warn("[JofferHub] Save failed. Make sure you own a land plot.")
             axeDupeRunning = false; return
         end
-        task.wait(1.0)  -- let server fully write the save
+        task.wait(1.2) -- let server fully commit the save
 
-        -- ── STEP 3: Check load permission ────────────────────────────
-        -- ClientMayLoad is called before every load in the original client.
-        -- Signature: InvokeServer(LP) → returns bool, errMsg
+        -- ── STEP 3: Check load permission ─────────────────────────────
         local mayRF = ls:FindFirstChild("ClientMayLoad")
         if not mayRF or not mayRF:IsA("RemoteFunction") then
             warn("[JofferHub] ClientMayLoad not found."); axeDupeRunning = false; return
@@ -929,38 +949,36 @@ local function StartAxeDupe(dupeSlot)
 
         print("[JofferHub] (2/3) Checking load permission...")
         local mayOk, mayRes = pcall(function() return mayRF:InvokeServer(LP) end)
-        print("[JofferHub] MayLoad → ok="..tostring(mayOk).." res="..tostring(mayRes))
+        print("[JofferHub] MayLoad → "..tostring(mayOk).." / "..tostring(mayRes))
         if not mayOk or mayRes == false then
-            warn("[JofferHub] Server denied load — try again in a few seconds.")
+            warn("[JofferHub] Load denied — wait a moment and try again.")
             axeDupeRunning = false; return
         end
 
-        -- ── STEP 4: Fire RequestLoad — triggers reset + land screen ──
-        -- Signature from decompiled loadSlot(): InvokeServer(slotNum, LP, version)
-        -- version=nil means load the latest save (current).
-        -- DO NOT kill character manually — RequestLoad handles the reset.
-        -- DO NOT touch CurrentSaveSlot.Value — the anti-cheat kicks you.
+        -- ── STEP 4: Fire RequestLoad on the load slot ─────────────────
+        -- This triggers the character reset + land selection screen.
+        -- The axe in character hands (Step 1) SURVIVES this reset.
+        -- After confirming your land plot, the save from Step 2 restores
+        -- the axe into your backpack/hands = you now have 2 total.
         local loadRF = ls:FindFirstChild("RequestLoad")
         if not loadRF or not loadRF:IsA("RemoteFunction") then
             warn("[JofferHub] RequestLoad not found."); axeDupeRunning = false; return
         end
 
-        print("[JofferHub] (3/3) Loading slot "..dupeSlot.."...")
-        print("[JofferHub] ★ Land selection screen will appear — confirm your plot!")
-        print("[JofferHub] ★ After confirming → you will have 2 axes.")
+        print("[JofferHub] (3/3) Loading slot "..loadSlot.."...")
+        print("[JofferHub] ★ Land selection screen will appear — confirm your plot to finish!")
 
-        pcall(function() loadRF:InvokeServer(dupeSlot, LP, nil) end)
+        pcall(function() loadRF:InvokeServer(loadSlot, LP, nil) end)
 
-        -- ── STEP 5: Wait for respawn + land confirmation ──────────────
+        -- ── STEP 5: Wait for CharacterAdded + land confirm ────────────
         LP.CharacterAdded:Wait()
-        task.wait(4)  -- wait for user to confirm land screen + load to settle
+        task.wait(4) -- buffer for land screen confirmation + load settle
 
-        -- Count final tools
         local total = 0
         for _, t in ipairs(LP.Backpack:GetChildren()) do if t:IsA("Tool") then total += 1 end end
         local c2 = GetChar()
         if c2 then for _, t in ipairs(c2:GetChildren()) do if t:IsA("Tool") then total += 1 end end end
-        print("[JofferHub] Dupe done. Tools in inventory: "..total..". Press again to dupe more.")
+        print("[JofferHub] Done! Tools now: "..total..". Run again to stack more.")
         axeDupeRunning = false
     end)
 end
@@ -1247,25 +1265,16 @@ end)
 
 -- DUPE TAB
 local DupeTab = CreateTab("Dupe","📦")
-DupeTab:AddSection("Axe Dupe — How It Works")
-DupeTab:AddLabel("1. Equip axe in hands (not just backpack)")
-DupeTab:AddLabel("2. Pick any save slot (1-6)")
-DupeTab:AddLabel("3. Press Start Axe Dupe")
-DupeTab:AddLabel("4. Script saves → loads same slot → char resets")
-DupeTab:AddLabel("5. Equipped axe survives reset (stays in hands)")
-DupeTab:AddLabel("6. Load restores axe from save = 2 total")
-DupeTab:AddLabel("7. Confirm the land plot screen when it appears")
-DupeTab:AddLabel("8. Repeat from step 3 to stack more")
-DupeTab:AddSection("Axe Dupe Controls")
-local slotOptions = {"1","2","3","4","5","6"}
-local slotDrop = DupeTab:AddDropdown("Save Slot",{Options=slotOptions, Default="1"})
-DupeTab:AddButton("▶ Start Axe Dupe",function()
-    local slot = tonumber(slotDrop:Get()) or 1
-    StartAxeDupe(slot)
+DupeTab:AddSection("Axe Dupe")
+local loadedSlotSlider = DupeTab:AddSlider("Your Loaded Slot",{Min=1,Max=6,Default=1,Step=1})
+local slotToLoadSlider = DupeTab:AddSlider("Slot to load",    {Min=1,Max=6,Default=1,Step=1})
+DupeTab:AddButton("Dupe Axe",function()
+    local ls = loadedSlotSlider:Get()
+    local ll = slotToLoadSlider:Get()
+    StartAxeDupe(ls, ll)
 end)
-DupeTab:AddButton("■ Stop / Cancel",function()
+DupeTab:AddButton("■ Stop",function()
     StopAxeDupe()
-    print("[JofferHub] Axe dupe stopped.")
 end)
 DupeTab:AddSection("Helpers")
 DupeTab:AddButton("Grab Nearby Tools", function() GrabTools(30) end)
@@ -1299,7 +1308,7 @@ SettingsTab:AddButton("Rejoin Server",function()
 end)
 SettingsTab:AddButton("Destroy GUI",function() ScreenGui:Destroy() end)
 SettingsTab:AddSection("About")
-SettingsTab:AddLabel("Joffer Hub v8.0  |  LT2 #13822889")
+SettingsTab:AddLabel("Joffer Hub v9.0  |  LT2 #13822889")
 SettingsTab:AddLabel("Remotes verified from deep RBXLX analysis")
 
 -- ═══════════════════════════════════════════════════════════════════
@@ -1322,6 +1331,5 @@ end)
 Main.Size=UDim2.new(0,0,0,0); Main.BackgroundTransparency=1
 TwF(Main,{BackgroundTransparency=0}); TwS(Main,{Size=UDim2.new(0,T.WinW,0,T.WinH)})
 
-print("[JofferHub v8.0] Loaded! GUI → "..tostring(guiParent).." | RightCtrl = toggle")
-print("[JofferHub] AXE DUPE: Equip axe → Start Dupe → Confirm land screen → 2 axes.")
-print("[JofferHub] Uses RequestSave+RequestLoad remotes. CurrentSaveSlot NOT touched (anti-cheat).")
+print("[JofferHub v9.0] Loaded! GUI → "..tostring(guiParent).." | RightCtrl = toggle")
+print("[JofferHub] DUPE: Equip axe → set both slots to 1 → Dupe Axe → confirm land screen.")
