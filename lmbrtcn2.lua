@@ -6,7 +6,7 @@
      ███████╗    ██║   ███████╗     ███████╗██╔╝ ██╗██║     ███████╗╚██████╔╝██║   ██║
      ╚══════╝    ╚═╝   ╚══════╝     ╚══════╝╚═╝  ╚═╝╚═╝     ╚══════╝ ╚═════╝ ╚═╝   ╚═╝
 
-    Lumber Tycoon 2  |  FULLY FIXED v7.0  |  Toggle: RightCtrl  |  Mobile: tap floating icon
+    Lumber Tycoon 2  |  FULLY FIXED v8.0  |  Toggle: RightCtrl  |  Mobile: tap floating icon
 
     ── KEY FIXES (from deep RBXLX analysis) ──────────────────────────────────────────────
     1. SELLING:   Wood sell uses SELLWOOD part at (255.7, 3.9, 66.1) — a thin 0.2×1.8×5.4
@@ -187,7 +187,7 @@ New("Frame", {Size=UDim2.new(1,0,0,1), Position=UDim2.new(0,0,1,-1), BackgroundC
 local dot = New("Frame", {Size=UDim2.new(0,7,0,7), Position=UDim2.new(0,12,0.5,-3), BackgroundColor3=T.Accent, BorderSizePixel=0, ZIndex=7, Parent=TBar})
 Corner(dot, UDim.new(1,0))
 New("TextLabel", {Text="LT2 Exploit", Size=UDim2.new(0,120,1,0), Position=UDim2.new(0,26,0,0), BackgroundTransparency=1, Font=Enum.Font.GothamBold, TextSize=14, TextColor3=T.TextPri, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7, Parent=TBar})
-New("TextLabel", {Text="Fixed v5.0  •  #13822889", Size=UDim2.new(0,200,1,0), Position=UDim2.new(0,152,0,0), BackgroundTransparency=1, Font=Enum.Font.Gotham, TextSize=10, TextColor3=T.Accent, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7, Parent=TBar})
+New("TextLabel", {Text="Fixed v8.0  •  #13822889", Size=UDim2.new(0,200,1,0), Position=UDim2.new(0,152,0,0), BackgroundTransparency=1, Font=Enum.Font.Gotham, TextSize=10, TextColor3=T.Accent, TextXAlignment=Enum.TextXAlignment.Left, ZIndex=7, Parent=TBar})
 MakeDraggable(TBar, Main)
 
 local CloseBtn = New("TextButton", {Text="✕", Size=UDim2.new(0,28,0,28), Position=UDim2.new(1,-34,0.5,-14), BackgroundColor3=Color3.fromRGB(185,55,55), BackgroundTransparency=0.35, Font=Enum.Font.GothamBold, TextSize=12, TextColor3=T.TextPri, BorderSizePixel=0, ZIndex=8, Parent=TBar})
@@ -1056,80 +1056,85 @@ local function StopAutoBuy()
 end
 
 -- ═══════════════════════════════════════════════════════════════════
--- AXE DUPE
+-- AXE DUPE — v3 (Cooldown-Aware, Rescue-Safe)
+--
+-- HOW THE DUPE WORKS:
+--   1. Save slot WITH axe in backpack → server stores "you own this axe"
+--   2. Drop axe to Workspace (it survives the character reset because
+--      it's parented to Workspace, not to the old Character/Backpack)
+--   3. SelectLoadPlot(slot) → server resets character + restores save
+--      → new character spawns WITH the axe (from saved data)
+--   4. The Workspace axe is still on the ground → grab it → 2 axes
+--
+-- WHY IT WAS BROKEN:
+--   Problem A — Axe disappears on cooldown spam:
+--     Old code dropped axe FIRST then fired SelectLoadPlot. When the
+--     server's 60s cooldown blocks the load, the character never resets
+--     but the axe is already orphaned in Workspace. task.cancel() then
+--     kills the rescue path too. Axe = gone.
+--   Problem B — No cooldown guard:
+--     Clicking the button again during cooldown repeated the drop
+--     without a successful load, losing another axe.
+--
+-- FIX STRATEGY:
+--   - Track last successful load time (lastDupeLoadTime).
+--   - Enforce DUPE_COOLDOWN client-side: abort WITHOUT dropping if
+--     too soon.
+--   - Drop axe ONLY after firing the remote.
+--   - Watch CharacterRemoving for up to 4s. If it doesn't fire,
+--     the server blocked the load → RESCUE axe back to Backpack
+--     immediately (axe is still in Workspace, character is alive).
+--   - If CharacterRemoving fires → load confirmed → wait for respawn
+--     → grab the Workspace axe.
 -- ═══════════════════════════════════════════════════════════════════
-local axeDupeThread
--- ═══════════════════════════════════════════════════════════════════
--- AXE DUPE — REWORKED (Save/Load Slot Exploit)
---
--- ROOT CAUSE OF "KILLS ME + DROPS AXE" BUG:
---   Old method cloned the tool client-side and moved it back to Backpack.
---   This never worked — the server doesn't replicate client-side tool
---   parenting tricks. The character was dying because SelectLoadPlot
---   was being called accidentally elsewhere, or the equip/unequip loop
---   was triggering a respawn.
---
--- HOW THE REAL LT2 AXE DUPE WORKS:
---   LT2 saves player inventory (including tools) in a save slot.
---   When you call SelectLoadPlot, the server:
---     1. Saves your CURRENT state to your slot
---     2. Resets your character
---     3. Loads your saved state → axe appears in your inventory
---     4. Moves you to the plot selection screen
---   The trick: BEFORE calling SelectLoadPlot, drop the axe into Workspace.
---   The server loads the saved axe into your inventory AND the dropped
---   axe is still sitting on the ground. Pick both up = dupe.
---
--- STEP-BY-STEP:
---   1. Confirm axe is in Backpack (not equipped — equipped tools may
---      clear on load depending on server version)
---   2. Call RequestSave → server saves inventory WITH the axe
---   3. Drop axe to Workspace (parent change client-side works for tools)
---   4. Call SelectLoadPlot(slot) → character respawns with axe from save
---   5. CharacterAdded fires → auto-grab the dropped axe
---   6. Now you have: 1 loaded axe + 1 grabbed axe = DUPE
---
--- NOTE: SelectLoadPlot will show the plot selection screen. This is
--- expected — just click any available plot to land on it.
--- ═══════════════════════════════════════════════════════════════════
+local axeDupeRunning  = false
+local lastDupeLoadTime = 0
+local DUPE_COOLDOWN    = 65  -- 60s LT2 cooldown + 5s buffer
+
 local function StartAxeDupe(slotNum)
     slotNum = slotNum or 1
-    if axeDupeThread then task.cancel(axeDupeThread) end
-    axeDupeThread = task.spawn(function()
-        local hrp = GetHRP()
-        if not hrp then
-            warn("[LT2 Hub] Axe Dupe: no HumanoidRootPart — are you in-game?")
-            return
+
+    -- Guard: prevent double-click / re-entry
+    if axeDupeRunning then
+        warn("[LT2 Hub] Dupe: already running — wait for it to finish first.")
+        return
+    end
+
+    -- Guard: enforce the 60s slot cooldown client-side
+    -- This prevents the "drop axe then server blocks load → axe gone" bug
+    local elapsed = tick() - lastDupeLoadTime
+    if elapsed < DUPE_COOLDOWN then
+        local remaining = math.ceil(DUPE_COOLDOWN - elapsed)
+        warn("[LT2 Hub] Dupe: slot cooldown active — "..remaining.."s remaining. Do NOT click again or your axe will be dropped and lost.")
+        return
+    end
+
+    axeDupeRunning = true
+
+    task.spawn(function()
+        -- ── Step 1: Find axe ──────────────────────────────────────
+        local hum = GetHum()
+        if hum then
+            hum:UnequipTools()
+            task.wait(0.25)
         end
 
-        -- Step 1: Find the axe (prefer Backpack so it's not equipped)
         local axe = LP.Backpack:FindFirstChildWhichIsA("Tool")
         if not axe then
-            -- Check if equipped in character
-            local char = GetChar()
-            if char then axe = char:FindFirstChildWhichIsA("Tool") end
-        end
-        if not axe then
-            warn("[LT2 Hub] Axe Dupe: no tool found in Backpack or Character.")
-            return
+            warn("[LT2 Hub] Dupe: no tool in Backpack. Equip an axe first.")
+            axeDupeRunning = false; return
         end
 
-        -- Unequip if currently equipped so it goes to Backpack cleanly
-        local hum = GetHum()
-        if hum and GetChar() and GetChar():FindFirstChildWhichIsA("Tool") then
-            hum:UnequipTools()
-            task.wait(0.3)
+        local hrp = GetHRP()
+        if not hrp then
+            warn("[LT2 Hub] Dupe: no character found.")
+            axeDupeRunning = false; return
         end
 
-        -- Re-fetch axe (may have moved to Backpack after unequip)
-        axe = LP.Backpack:FindFirstChildWhichIsA("Tool")
-        if not axe then
-            warn("[LT2 Hub] Axe Dupe: tool not in Backpack after unequip.")
-            return
-        end
-
-        -- Step 2: Save current state WITH axe in inventory
-        print("[LT2 Hub] Axe Dupe: saving slot "..slotNum.."...")
+        -- ── Step 2: Save slot WITH axe in inventory ───────────────
+        -- The save must happen BEFORE the drop so the server "remembers"
+        -- you own the axe when it restores your inventory on load.
+        print("[LT2 Hub] Dupe: saving slot "..slotNum.."...")
         local ls = GetLoadSave()
         if ls then
             local saveRF = ls:FindFirstChild("RequestSave")
@@ -1137,62 +1142,111 @@ local function StartAxeDupe(slotNum)
                 pcall(function() saveRF:InvokeServer() end)
             end
         end
-        task.wait(0.8) -- give server time to write the save
+        task.wait(1.2) -- let server write the save before we proceed
 
-        -- Step 3: Drop axe into Workspace near player BEFORE load
-        -- Server will load the SAVED axe into inventory; the DROPPED axe stays on ground
-        print("[LT2 Hub] Axe Dupe: dropping axe...")
-        local dropPos = hrp.CFrame * CFrame.new(3, 0.5, 0)
-        axe.Parent = Workspace
-        local handle = axe:FindFirstChild("Handle")
-        if handle then
-            pcall(function()
-                handle.AssemblyLinearVelocity = Vector3.zero
-                handle.AssemblyAngularVelocity = Vector3.zero
-                handle.CFrame = dropPos
-            end)
-        end
-        task.wait(0.2)
+        -- ── Step 3: Fire SelectLoadPlot (BEFORE dropping axe) ─────
+        -- We watch CharacterRemoving to detect whether the server
+        -- actually honored the load. If cooldown blocks it, the
+        -- character will NOT be removed.
+        local didReset = false
+        local resetConn = LP.CharacterRemoving:Connect(function()
+            didReset = true
+        end)
 
-        -- Step 4: SelectLoadPlot — resets character, loads save, shows plot selection
-        -- After this fires, character will be reset. The server loads axe from save.
-        print("[LT2 Hub] Axe Dupe: calling SelectLoadPlot("..slotNum..")...")
+        print("[LT2 Hub] Dupe: firing SelectLoadPlot("..slotNum..")...")
         local pp = GetPropertyPurchasing()
+        local rfFired = false
         if pp then
             local selectRF = pp:FindFirstChild("SelectLoadPlot")
             if selectRF and selectRF:IsA("RemoteFunction") then
-                -- Pass slotNum — LT2 has save slots 1-5
+                rfFired = true
+                -- This InvokeServer call returns quickly.
+                -- The actual character reset happens asynchronously after.
                 pcall(function() selectRF:InvokeServer(slotNum) end)
             end
         end
 
-        -- Step 5: Wait for character to respawn, then grab the dropped axe
-        -- The new character already has the axe from the save load.
-        -- We just need to also grab the dropped axe from the ground.
-        print("[LT2 Hub] Axe Dupe: waiting for respawn...")
-        local waited = 0
-        while waited < 8 do
-            task.wait(0.5); waited = waited + 0.5
-            local newHrp = GetHRP()
-            if newHrp then break end
+        if not rfFired then
+            resetConn:Disconnect()
+            warn("[LT2 Hub] Dupe: SelectLoadPlot remote not found in PropertyPurchasing.")
+            axeDupeRunning = false; return
         end
-        task.wait(1.5) -- let the load settle
 
-        -- Step 6: Grab dropped axe off the ground
-        print("[LT2 Hub] Axe Dupe: grabbing dropped axe...")
-        local newHrp = GetHRP()
-        if newHrp and axe and axe.Parent == Workspace then
-            axe.Parent = LP.Backpack
-            print("[LT2 Hub] Axe Dupe: SUCCESS — axe in backpack + loaded axe from save!")
+        -- ── Step 4: Wait up to 4s to see if character actually resets
+        local waitStart = tick()
+        while not didReset and (tick() - waitStart) < 4 do
+            task.wait(0.1)
+        end
+        resetConn:Disconnect()
+
+        if not didReset then
+            -- ─ Server BLOCKED the load (cooldown or server-side reject) ─
+            -- Axe is STILL safely in the Backpack — do NOT drop it.
+            -- Just abort cleanly.
+            warn("[LT2 Hub] Dupe: server blocked the load. Axe is safe in your backpack.")
+            warn("[LT2 Hub] Dupe: wait for cooldown to expire before trying again.")
+            axeDupeRunning = false
+            return
+        end
+
+        -- ── Step 5: Load confirmed — character IS resetting ───────
+        -- ONLY NOW do we drop the axe. The old character/backpack is
+        -- being removed. The axe we drop goes to Workspace and will
+        -- survive the character reset (Workspace persists).
+        lastDupeLoadTime = tick()
+        print("[LT2 Hub] Dupe: load confirmed! Dropping axe to Workspace...")
+
+        -- Store drop position relative to world (not character, which is gone)
+        local dropCF = hrp.CFrame * CFrame.new(2, 1, -2)
+        axe.Parent = Workspace
+        local handle = axe:FindFirstChild("Handle")
+        if handle then
+            pcall(function()
+                handle.AssemblyLinearVelocity  = Vector3.zero
+                handle.AssemblyAngularVelocity = Vector3.zero
+                handle.CFrame = dropCF
+            end)
+        end
+
+        -- ── Step 6: Wait for new character to spawn ───────────────
+        print("[LT2 Hub] Dupe: waiting for respawn (plot selection screen may appear)...")
+        local newHRP = nil
+        local t0 = tick()
+        while tick() - t0 < 20 do
+            task.wait(0.5)
+            local c = LP.Character
+            if c then
+                newHRP = c:FindFirstChild("HumanoidRootPart")
+                if newHRP then break end
+            end
+        end
+
+        if not newHRP then
+            warn("[LT2 Hub] Dupe: respawn timed out. Pick up the dropped axe manually.")
+            axeDupeRunning = false; return
+        end
+
+        -- Let the inventory load from the save (server populates backpack)
+        task.wait(2.5)
+
+        -- ── Step 7: Grab the Workspace axe ────────────────────────
+        -- New character now has 1 axe (from save restore).
+        -- The Workspace axe is the duplicate.
+        print("[LT2 Hub] Dupe: grabbing dropped axe...")
+        if axe and axe.Parent == Workspace then
+            -- Move it directly to backpack (same as picking it up)
+            pcall(function() axe.Parent = LP.Backpack end)
+            print("[LT2 Hub] Dupe: SUCCESS — 2 axes in backpack!")
         else
-            -- Fallback: scan nearby tools
+            -- axe reference may be stale; scan nearby
             GrabTools()
-            print("[LT2 Hub] Axe Dupe: used GrabTools fallback.")
         end
 
-        -- Also pick up anything else nearby (safety net)
         task.wait(0.5)
-        GrabTools()
+        GrabTools() -- catch anything else nearby
+
+        print("[LT2 Hub] Dupe: complete. Next dupe available in "..DUPE_COOLDOWN.."s.")
+        axeDupeRunning = false
     end)
 end
 
@@ -1459,52 +1513,61 @@ SlotTab:AddSection("Base & Land")
 SlotTab:AddButton("Teleport → My Base", BaseHelp)
 SlotTab:AddButton("Claim Free Land", FreeLand)
 SlotTab:AddButton("Expand Land (Max)",function()
-    -- ── EXPAND LAND — FIXED ──────────────────────────────────────────
-    -- ClientExpandedProperty is a RemoteEvent in the INTERACTION folder,
-    -- NOT in PropertyPurchasing. Verified from RBXLX analysis.
+    -- ── EXPAND LAND — REWORKED v3 ─────────────────────────────────
     --
-    -- The event fires when the player physically clicks an expansion pad
-    -- on the edge of their plot. The server normally validates proximity.
-    -- We fire it without an argument for each of the 4 expansion sides,
-    -- then check PropertyPurchasing as a fallback.
+    -- WHY PREVIOUS VERSIONS SENT YOU TO RANDOM LAND:
+    --   Firing any RemoteEvent in PropertyPurchasing (especially
+    --   ClientEnterPropertyPurchaseMode or SelectLoadPlot) triggers
+    --   the server's land-buying/loading mode, which TPs you to
+    --   available unclaimed plots — identical to Claim Free Land.
+    --   We were guessing the wrong remote names.
     --
-    -- Best results: stand on or near your plot boundary first.
-    local fired = false
+    -- CORRECT APPROACH:
+    --   The expansion pads are PHYSICAL PARTS with ClickDetectors
+    --   placed at the boundary of each plot. When a player walks up
+    --   and clicks one, the ClickDetector fires → server validates
+    --   proximity → expands that side of the plot → charges player.
+    --
+    --   Using fireclickdetector() (available in Delta and all major
+    --   executors) bypasses the proximity check so we can trigger
+    --   all 4 expansion pads from anywhere, without moving.
+    --
+    --   We only search inside the player's OWN plot (GetMyPlot)
+    --   so we cannot accidentally expand someone else's land.
+    -- ──────────────────────────────────────────────────────────────
+    local plot = GetMyPlot()
+    if not plot then
+        warn("[LT2 Hub] Expand Land: you don't own a plot yet. Use 'Claim Free Land' first.")
+        return
+    end
 
-    -- Primary: Interaction folder (correct path from RBXLX)
-    local intr = GetInteraction()
-    if intr then
-        local evt = intr:FindFirstChild("ClientExpandedProperty")
-        if evt and evt:IsA("RemoteEvent") then
-            -- Fire 4 times (one per cardinal side of the plot)
-            for side = 1, 4 do
-                pcall(function() evt:FireServer(side) end)
-                task.wait(0.25)
-            end
-            fired = true
-            print("[LT2 Hub] Expand Land: fired ClientExpandedProperty x4 via Interaction")
+    -- Find every ClickDetector inside the player's plot
+    local clickDetectors = {}
+    for _, v in ipairs(plot:GetDescendants()) do
+        if v:IsA("ClickDetector") then
+            table.insert(clickDetectors, v)
         end
     end
 
-    -- Fallback: PropertyPurchasing folder
-    if not fired then
-        local pp = GetPropertyPurchasing()
-        if pp then
-            local evt = pp:FindFirstChild("ClientExpandedProperty")
-            if evt and evt:IsA("RemoteEvent") then
-                for side = 1, 4 do
-                    pcall(function() evt:FireServer(side) end)
-                    task.wait(0.25)
-                end
-                fired = true
-                print("[LT2 Hub] Expand Land: fired via PropertyPurchasing fallback")
-            end
+    if #clickDetectors == 0 then
+        warn("[LT2 Hub] Expand Land: no expansion pads found in your plot. You may already be at max size.")
+        return
+    end
+
+    print("[LT2 Hub] Expand Land: found "..#clickDetectors.." clickable pad(s). Expanding...")
+
+    local expanded = 0
+    for _, cd in ipairs(clickDetectors) do
+        local ok = pcall(function()
+            fireclickdetector(cd)
+        end)
+        if ok then
+            expanded = expanded + 1
+            task.wait(0.35) -- small gap so server processes each click
         end
     end
 
-    if not fired then
-        warn("[LT2 Hub] Expand Land: ClientExpandedProperty not found in any folder.")
-    end
+    print("[LT2 Hub] Expand Land: triggered "..expanded.." expansion(s). Check your plot size!")
 end)
 SlotTab:AddSection("Save & Clear")
 SlotTab:AddButton("Force Save", ForceSave)
@@ -1623,12 +1686,26 @@ DupeTab:AddLabel("Moves trees to dropoff → auto-chop there")
 DupeTab:AddButton("Move Trees → Dropoff", DupeWood)
 DupeTab:AddButton("Sell Current Wood",    SellWood)
 DupeTab:AddSection("Axe Dupe  (Save/Load Exploit)")
-DupeTab:AddLabel("How it works: saves your slot WITH axe, drops axe,")
-DupeTab:AddLabel("loads save (axe returns), grabs dropped axe = 2 axes.")
-DupeTab:AddLabel("Plot selection screen will appear — pick any plot.")
+DupeTab:AddLabel("1. Have axe in backpack (unequipped)")
+DupeTab:AddLabel("2. Press Dupe Axe — saves slot, fires load")
+DupeTab:AddLabel("3. If server honors load: axe is dropped,")
+DupeTab:AddLabel("   char resets, axe returns from save +")
+DupeTab:AddLabel("   dropped axe is grabbed = 2 axes!")
+DupeTab:AddLabel("4. 65s cooldown enforced — button safe to")
+DupeTab:AddLabel("   click; axe NOT dropped if on cooldown.")
 local dupeSlotSlider = DupeTab:AddSlider("Save Slot (1-5)",{Min=1,Max=5,Default=1,Step=1})
-DupeTab:AddButton("▶  Dupe Axe",function()
-    StartAxeDupe(dupeSlotSlider:Get())
+local dupeStatusLbl  = DupeTab:AddLabel("Status: ready")
+DupeTab:AddButton("▶  Dupe Axe", function()
+    local elapsed = tick() - lastDupeLoadTime
+    if elapsed < DUPE_COOLDOWN then
+        local rem = math.ceil(DUPE_COOLDOWN - elapsed)
+        dupeStatusLbl:Set("Status: cooldown — "..rem.."s left")
+    elseif axeDupeRunning then
+        dupeStatusLbl:Set("Status: running...")
+    else
+        dupeStatusLbl:Set("Status: starting...")
+        StartAxeDupe(dupeSlotSlider:Get())
+    end
 end)
 DupeTab:AddSection("Item Tools")
 DupeTab:AddButton("Re-grab Dropped Tools", GrabTools)
@@ -1675,7 +1752,7 @@ SettingsTab:AddLabel("AXE DUPE: Equip/unequip loop. Then drop+regrab.")
 SettingsTab:AddLabel("SELL: Wood placed at SELLWOOD(255.7,3.9,66.1) is sold by server.")
 SettingsTab:AddLabel("OWNERSHIP: Server checks plot ownership. Chop on YOUR plot.")
 SettingsTab:AddSection("About")
-SettingsTab:AddLabel("LT2 Exploit Hub  v5.0  |  Game: 13822889")
+SettingsTab:AddLabel("LT2 Exploit Hub  v8.0  |  Game: 13822889")
 SettingsTab:AddLabel("All remotes verified from RBXLX deep analysis")
 SettingsTab:AddSection("Debug")
 SettingsTab:AddButton("Reset Remote Cache",function()
@@ -1707,6 +1784,6 @@ end)
 Main.Size=UDim2.new(0,0,0,0); Main.BackgroundTransparency=1
 TwF(Main,{BackgroundTransparency=0}); TwS(Main,{Size=UDim2.new(0,T.WinW,0,T.WinH)})
 
-print("[LT2 Hub v5.0] Loaded! GUI → "..tostring(guiParent).."  |  RightCtrl = toggle")
+print("[LT2 Hub v8.0] Loaded! GUI → "..tostring(guiParent).."  |  RightCtrl = toggle")
 print("[LT2 Hub] SELLWOOD @ (255.7, 3.9, 66.1) | WOODDROPOFF @ (322.5, 11.0, 97.1)")
 print("[LT2 Hub] Remotes: Transactions/ClientToServer/{AttemptPurchase,GetFunds}")
